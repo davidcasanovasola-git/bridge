@@ -28,6 +28,9 @@ pub struct Config {
     pub private_key: String,
     pub public_key: String,
     pub peer: Option<Peer>,
+    /// Last known displays reported by the paired peer.
+    #[serde(default)]
+    pub peer_displays: Vec<crate::proto::DisplayInfo>,
     /// Which edge of this machine's screens the other machine sits beyond.
     pub peer_side: Side,
     /// Offset along the shared border (in pixels) of the other machine's screens.
@@ -73,6 +76,7 @@ impl Default for Config {
             private_key: String::new(),
             public_key: String::new(),
             peer: None,
+            peer_displays: Vec::new(),
             peer_side: if mac { Side::Right } else { Side::Left },
             peer_offset: 0.0,
             edge_resistance: 30.0,

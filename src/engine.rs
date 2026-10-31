@@ -97,6 +97,7 @@ impl Engine {
         on_status: Box<dyn Fn(Status) + Send>,
     ) -> Engine {
         let peer_os = cfg.read().unwrap().peer.as_ref().map(|p| p.os);
+        let saved_peer_displays = cfg.read().unwrap().peer_displays.clone();
         Engine {
             cfg,
             net,
@@ -108,7 +109,7 @@ impl Engine {
             displays: vec![],
             displays_at: Instant::now() - Duration::from_secs(60),
             local_displays: vec![],
-            peer_displays: vec![],
+            peer_displays: saved_peer_displays,
             push: 0.0,
             pos: (0.0, 0.0),
             reclaim: 0.0,
@@ -507,7 +508,13 @@ impl Engine {
             Msg::Ping => {}
             Msg::Displays(ds) => {
                 log::info!("peer reported {} displays: {ds:?}", ds.len());
-                self.peer_displays = ds;
+                self.peer_displays = ds.clone();
+                let mut c = self.cfg.write().unwrap();
+                if c.peer_displays != ds {
+                    c.peer_displays = ds;
+                    c.save();
+                }
+                drop(c);
                 self.report();
             }
             Msg::Clipboard(clip) => self.clipboard.apply(clip),

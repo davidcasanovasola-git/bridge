@@ -372,6 +372,12 @@ impl App {
             o.remove("peer");
         }
         let empty_displays = Vec::new();
+        let peer_displays = self
+            .status
+            .as_ref()
+            .map(|s| &s.peer_displays)
+            .filter(|d| !d.is_empty())
+            .unwrap_or(&c.peer_displays);
         json!({
             "type": "settings",
             "cfg": cfg,
@@ -380,7 +386,7 @@ impl App {
             "peer": c.peer.as_ref().map(|p| json!({"name": p.name, "os": p.os})),
             "connected": self.status.as_ref().is_some_and(|s| s.connected),
             "local_displays": self.status.as_ref().map(|s| &s.local_displays).unwrap_or(&empty_displays),
-            "peer_displays": self.status.as_ref().map(|s| &s.peer_displays).unwrap_or(&empty_displays),
+            "peer_displays": peer_displays,
         })
     }
 
@@ -512,6 +518,7 @@ impl App {
             "unpair" => {
                 let mut c = self.cfg.write().unwrap();
                 c.peer = None;
+                c.peer_displays.clear();
                 c.save();
                 drop(c);
                 let _ = self.tx.send(Event::Ui(Ui::Repaired));

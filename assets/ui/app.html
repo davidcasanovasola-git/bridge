@@ -607,7 +607,7 @@ body.banner { background: transparent; overflow: hidden; }
     }).join('');
 
     // Render peer monitors
-    const pDs = cleanPeer.length ? cleanPeer : [{ name: peerName, inches: 24, width: 2560, height: 1440, pixel_width: 2560, pixel_height: 1440, x: 0, y: 0 }];
+    const pDs = cleanPeer.length ? cleanPeer : [{ name: peerName, inches: null, width: 2560, height: 1440, pixel_width: 2560, pixel_height: 1440, x: 0, y: 0 }];
     peerCluster.innerHTML = pDs.map((d) => {
       const rx = Math.round(((d.x || 0) - pBounds.minX) * layoutScale);
       const ry = Math.round(((d.y || 0) - pBounds.minY) * layoutScale);
