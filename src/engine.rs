@@ -10,7 +10,7 @@ use crate::geometry::{self, Step};
 use crate::keymap;
 use crate::net::Net;
 use crate::platform::{Input, Platform, Rect};
-use crate::proto::{Msg, Os};
+use crate::proto::{Msg, Os, Side};
 use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, RwLock};
@@ -366,9 +366,9 @@ impl Engine {
     }
 
     fn watch_edge(&mut self, x: f64, y: f64, dx: f64, dy: f64) {
-        let (side, resistance, paused) = {
+        let (side, resistance, paused, peer_offset) = {
             let c = self.cfg.read().unwrap();
-            (c.peer_side, c.edge_resistance, c.paused)
+            (c.peer_side, c.edge_resistance, c.paused, c.peer_offset)
         };
         if paused || self.cfg.read().unwrap().peer.is_none() {
             return;
@@ -379,11 +379,25 @@ impl Engine {
             self.push = 0.0;
             return;
         }
-        // Windows clamps the reported position at the edge, so pushing into it reads as no movement.
-        let stalled = dx == 0.0 && dy == 0.0;
+
+        // When the cursor is at the physical edge, the OS clamps movement in the outward direction to 0.0.
+        // Parallel motion along the edge often has minor human hand jitter (e.g. mouse moving downward has slight dx noise).
+        let stalled = match side {
+            Side::Left | Side::Right => dx == 0.0 && dy.abs() < 8.0,
+            Side::Top | Side::Bottom => dy == 0.0 && dx.abs() < 8.0,
+        };
         if out == 0.0 && !stalled {
             return;
         }
+
+        // Check if a peer display exists at this position along the shared edge
+        let frac = geometry::peer_frac_along(&ds, &self.peer_displays, x, y, side, peer_offset);
+        let Some(frac) = frac else {
+            // No peer display overlaps with this edge coordinate. Keep cursor on local screen.
+            self.push = 0.0;
+            return;
+        };
+
         self.push += out.max(1.0);
         if self.push < resistance {
             return;
@@ -392,7 +406,7 @@ impl Engine {
         if self.cfg.read().unwrap().block_in_fullscreen && self.plat.fullscreen_app() {
             return;
         }
-        self.hand_over(Some(geometry::frac_along(&ds, x, y, side)));
+        self.hand_over(Some(frac));
     }
 
     fn send_clipboard(&mut self) {
@@ -532,13 +546,10 @@ impl Engine {
                     // Both pushed at once; the newcomer wins.
                     self.plat.set_capturing(false);
                 }
-                let (side, offset) = {
-                    let c = self.cfg.read().unwrap();
-                    (c.peer_side, c.peer_offset)
-                };
+                let side = self.cfg.read().unwrap().peer_side;
                 let ds = self.displays().to_vec();
                 let p = match frac {
-                    Some(f) => geometry::entry_point_with_offset(&ds, side, f, offset),
+                    Some(f) => geometry::entry_point(&ds, side, f),
                     None => geometry::center(&ds),
                 };
                 self.pos = p;
@@ -555,12 +566,9 @@ impl Engine {
                     self.plat.set_capturing(false);
                     self.mode = Mode::Controlled;
                     if let Some(f) = frac {
-                        let (side, offset) = {
-                            let c = self.cfg.read().unwrap();
-                            (c.peer_side, c.peer_offset)
-                        };
+                        let side = self.cfg.read().unwrap().peer_side;
                         let ds = self.displays().to_vec();
-                        let (x, y) = geometry::entry_point_with_offset(&ds, side, f, offset);
+                        let (x, y) = geometry::entry_point(&ds, side, f);
                         self.pos = (x, y);
                         self.plat.warp(x, y);
                     }
@@ -570,12 +578,9 @@ impl Engine {
                     self.go_local();
                     if was == Mode::Controlling {
                         if let Some(f) = frac {
-                            let (side, offset) = {
-                                let c = self.cfg.read().unwrap();
-                                (c.peer_side, c.peer_offset)
-                            };
+                            let side = self.cfg.read().unwrap().peer_side;
                             let ds = self.displays().to_vec();
-                            let (x, y) = geometry::entry_point_with_offset(&ds, side, f, offset);
+                            let (x, y) = geometry::entry_point(&ds, side, f);
                             self.plat.warp(x, y);
                         }
                     } else if was == Mode::Controlled {
@@ -600,7 +605,15 @@ impl Engine {
                     }
                     Step::Exit(f) => {
                         if self.buttons_down.is_empty() {
-                            self.give_back(Some(f));
+                            let frac = geometry::peer_frac_along(
+                                &ds,
+                                &self.peer_displays,
+                                self.pos.0,
+                                self.pos.1,
+                                side,
+                                self.cfg.read().unwrap().peer_offset,
+                            ).unwrap_or(f);
+                            self.give_back(Some(frac));
                         }
                     }
                 }
