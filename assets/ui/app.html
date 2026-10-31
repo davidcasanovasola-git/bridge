@@ -194,16 +194,16 @@ body.banner { background: transparent; overflow: hidden; }
   <h2>Screen Arrangement &amp; Alignment</h2>
   <div class="list" style="padding:14px;background:var(--card);border-radius:14px;border:1px solid var(--line);margin-bottom:14px;">
     <!-- Interactive Canvas Stage -->
-    <div id="layout-stage" style="position:relative;width:100%;height:220px;border-radius:12px;background:rgba(0,0,0,0.12);border:1px dashed var(--line);overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;">
+    <div id="layout-stage" style="position:relative;width:100%;height:240px;border-radius:12px;background:rgba(0,0,0,0.12);border:1px dashed var(--line);overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;">
       
       <!-- Magnetic Snap Guideline Indicators -->
       <div id="snap-guide-h" style="position:absolute;left:0;right:0;height:1px;background:var(--accent);display:none;pointer-events:none;z-index:10;box-shadow:0 0 6px var(--accent);"></div>
       <div id="snap-guide-v" style="position:absolute;top:0;bottom:0;width:1px;background:var(--accent);display:none;pointer-events:none;z-index:10;box-shadow:0 0 6px var(--accent);"></div>
 
-      <!-- Local Machine Screens Cluster -->
-      <div id="local-cluster" style="position:absolute;z-index:2;pointer-events:none;"></div>
+      <!-- Local Machine Screens Cluster (Interactive & Draggable) -->
+      <div id="local-cluster" style="position:absolute;z-index:4;cursor:grab;touch-action:none;transition:box-shadow .15s;"></div>
 
-      <!-- Peer Machine Draggable Screens Cluster -->
+      <!-- Peer Machine Screens Cluster (Interactive & Draggable) -->
       <div id="peer-cluster" style="position:absolute;z-index:5;cursor:grab;touch-action:none;transition:box-shadow .15s;"></div>
 
       <!-- Live Snap Notification Overlay -->
@@ -530,7 +530,7 @@ body.banner { background: transparent; overflow: hidden; }
   function renderLayoutDesigner() {
     if (!stage || !localCluster || !peerCluster) return;
     const stageW = stage.clientWidth || 450;
-    const stageH = stage.clientHeight || 220;
+    const stageH = stage.clientHeight || 240;
 
     const myName = B.os === 'mac' ? 'Mac' : 'PC';
     const peerName = (curPeer && curPeer.name) ? curPeer.name : (B.os === 'mac' ? 'PC' : 'Mac');
@@ -541,79 +541,80 @@ body.banner { background: transparent; overflow: hidden; }
     lBounds = getBounds(cleanLocal, 2560, 1664);
     pBounds = getBounds(cleanPeer, 2560, 1440);
 
-    const isSideBySide = (curSide === 'left' || curSide === 'right');
-    const neededW = isSideBySide ? (lBounds.w + pBounds.w + 100) : (Math.max(lBounds.w, pBounds.w) + 60);
-    const neededH = isSideBySide ? (Math.max(lBounds.h, pBounds.h) + 60) : (lBounds.h + pBounds.h + 80);
+    // Physical gap between clusters in logical coordinates (~12px on canvas)
+    const gap = 160;
+    let peerVX = 0;
+    let peerVY = 0;
 
-    layoutScale = Math.min((stageW - 36) / Math.max(neededW, 600), (stageH - 36) / Math.max(neededH, 500));
-    layoutScale = Math.max(0.02, Math.min(0.12, layoutScale));
+    if (curSide === 'right') {
+      peerVX = lBounds.w + gap;
+      peerVY = curOffset || 0;
+    } else if (curSide === 'left') {
+      peerVX = -pBounds.w - gap;
+      peerVY = curOffset || 0;
+    } else if (curSide === 'top') {
+      peerVX = curOffset || 0;
+      peerVY = -pBounds.h - gap;
+    } else if (curSide === 'bottom') {
+      peerVX = curOffset || 0;
+      peerVY = lBounds.h + gap;
+    }
+
+    const minVX = Math.min(0, peerVX);
+    const maxVX = Math.max(lBounds.w, peerVX + pBounds.w);
+    const minVY = Math.min(0, peerVY);
+    const maxVY = Math.max(lBounds.h, peerVY + pBounds.h);
+
+    const sceneVW = Math.max(100, maxVX - minVX);
+    const sceneVH = Math.max(100, maxVY - minVY);
+
+    // Calculate layoutScale dynamically to fit the entire scene with margin
+    const padH = 44;
+    const padV = 40;
+    layoutScale = Math.min((stageW - padH) / Math.max(sceneVW, 800), (stageH - padV) / Math.max(sceneVH, 600));
+    layoutScale = Math.max(0.015, Math.min(0.12, layoutScale));
 
     const lClusterW = Math.round(lBounds.w * layoutScale);
     const lClusterH = Math.round(lBounds.h * layoutScale);
     const pClusterW = Math.round(pBounds.w * layoutScale);
     const pClusterH = Math.round(pBounds.h * layoutScale);
 
-    // Render local monitors
+    // Center the entire virtual scene inside the canvas stage
+    const canvasSceneW = sceneVW * layoutScale;
+    const canvasSceneH = sceneVH * layoutScale;
+    const originX = Math.round((stageW - canvasSceneW) / 2) - Math.round(minVX * layoutScale);
+    const originY = Math.round((stageH - canvasSceneH) / 2) - Math.round(minVY * layoutScale);
+
+    // Position clusters
     localCluster.style.width = lClusterW + 'px';
     localCluster.style.height = lClusterH + 'px';
+    localCluster.style.left = originX + 'px';
+    localCluster.style.top = originY + 'px';
+
+    peerCluster.style.width = pClusterW + 'px';
+    peerCluster.style.height = pClusterH + 'px';
+    peerCluster.style.left = (originX + Math.round(peerVX * layoutScale)) + 'px';
+    peerCluster.style.top = (originY + Math.round(peerVY * layoutScale)) + 'px';
+
+    // Render local monitors
     const lDs = cleanLocal.length ? cleanLocal : [{ name: myName, inches: 14, width: 2560, height: 1664, pixel_width: 2560, pixel_height: 1664, x: 0, y: 0 }];
     localCluster.innerHTML = lDs.map((d) => {
       const rx = Math.round(((d.x || 0) - lBounds.minX) * layoutScale);
       const ry = Math.round(((d.y || 0) - lBounds.minY) * layoutScale);
-      const rw = Math.max(54, Math.round((d.width || 2560) * layoutScale));
-      const rh = Math.max(36, Math.round((d.height || 1664) * layoutScale));
+      const rw = Math.max(50, Math.round((d.width || 2560) * layoutScale));
+      const rh = Math.max(34, Math.round((d.height || 1664) * layoutScale));
       return formatMonitorCard(d, myName, true, rx, ry, rw, rh);
     }).join('');
 
     // Render peer monitors
-    peerCluster.style.width = pClusterW + 'px';
-    peerCluster.style.height = pClusterH + 'px';
     const pDs = cleanPeer.length ? cleanPeer : [{ name: peerName, inches: 24, width: 2560, height: 1440, pixel_width: 2560, pixel_height: 1440, x: 0, y: 0 }];
     peerCluster.innerHTML = pDs.map((d) => {
       const rx = Math.round(((d.x || 0) - pBounds.minX) * layoutScale);
       const ry = Math.round(((d.y || 0) - pBounds.minY) * layoutScale);
-      const rw = Math.max(54, Math.round((d.width || 2560) * layoutScale));
-      const rh = Math.max(36, Math.round((d.height || 1440) * layoutScale));
+      const rw = Math.max(50, Math.round((d.width || 2560) * layoutScale));
+      const rh = Math.max(34, Math.round((d.height || 1440) * layoutScale));
       return formatMonitorCard(d, peerName, false, rx, ry, rw, rh);
     }).join('');
-
-    // Placement of clusters relative to each other
-    const gap = 10;
-    let lX = Math.round((stageW - lClusterW) / 2);
-    let lY = Math.round((stageH - lClusterH) / 2);
-
-    if (curSide === 'right') lX = Math.round((stageW - (lClusterW + pClusterW + gap)) / 2);
-    else if (curSide === 'left') lX = Math.round((stageW - (lClusterW + pClusterW + gap)) / 2 + pClusterW + gap);
-    else if (curSide === 'bottom') lY = Math.round((stageH - (lClusterH + pClusterH + gap)) / 2);
-    else if (curSide === 'top') lY = Math.round((stageH - (lClusterH + pClusterH + gap)) / 2 + pClusterH + gap);
-
-    localCluster.style.left = lX + 'px';
-    localCluster.style.top = lY + 'px';
-
-    const offsetCanvas = Math.round((curOffset || 0) * layoutScale);
-    let pX = lX + lClusterW + gap;
-    let pY = lY + offsetCanvas;
-
-    if (curSide === 'right') {
-      pX = lX + lClusterW + gap;
-      pY = lY + offsetCanvas;
-    } else if (curSide === 'left') {
-      pX = lX - pClusterW - gap;
-      pY = lY + offsetCanvas;
-    } else if (curSide === 'top') {
-      pX = lX + offsetCanvas;
-      pY = lY - pClusterH - gap;
-    } else if (curSide === 'bottom') {
-      pX = lX + offsetCanvas;
-      pY = lY + lClusterH + gap;
-    }
-
-    // Clamp inside stage bounds so it never disappears
-    pX = Math.max(6, Math.min(stageW - pClusterW - 6, pX));
-    pY = Math.max(6, Math.min(stageH - pClusterH - 6, pY));
-
-    peerCluster.style.left = pX + 'px';
-    peerCluster.style.top = pY + 'px';
 
     $$('.side-btn').forEach((b) => b.classList.toggle('primary', b.dataset.side === curSide));
 
@@ -738,115 +739,95 @@ body.banner { background: transparent; overflow: hidden; }
     send({ cmd: 'setLayout', side: curSide, offset: curOffset });
   }
 
-  if (peerCluster && stage) {
-    let startX = 0, startY = 0;
-    let initialX = 0, initialY = 0;
+  if (stage) {
+    let dragTarget = null;
+    let dragStartX = 0, dragStartY = 0;
+    let dragStartOffset = 0;
+    let dragStartSide = 'right';
 
-    peerCluster.addEventListener('pointerdown', (e) => {
+    function startClusterDrag(e, target) {
       isDragging = true;
-      peerCluster.setPointerCapture(e.pointerId);
-      peerCluster.style.cursor = 'grabbing';
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = peerCluster.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
-      initialX = rect.left - stageRect.left;
-      initialY = rect.top - stageRect.top;
-      if (!Number.isFinite(initialX)) initialX = 0;
-      if (!Number.isFinite(initialY)) initialY = 0;
+      dragTarget = target;
+      target.setPointerCapture(e.pointerId);
+      target.style.cursor = 'grabbing';
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartOffset = curOffset || 0;
+      dragStartSide = curSide || 'right';
       e.preventDefault();
-    });
+      e.stopPropagation();
+    }
+
+    if (peerCluster) {
+      peerCluster.addEventListener('pointerdown', (e) => startClusterDrag(e, peerCluster));
+    }
+    if (localCluster) {
+      localCluster.addEventListener('pointerdown', (e) => startClusterDrag(e, localCluster));
+    }
 
     window.addEventListener('pointermove', (e) => {
-      if (!isDragging) return;
-      const stageW = stage.clientWidth || 450;
-      const stageH = stage.clientHeight || 220;
+      if (!isDragging || !dragTarget) return;
+      const scale = layoutScale || 0.08;
+      const rawDx = (e.clientX - dragStartX) / scale;
+      const rawDy = (e.clientY - dragStartY) / scale;
 
-      const lClusterW = parseFloat(localCluster.style.width) || 120;
-      const lClusterH = parseFloat(localCluster.style.height) || 90;
-      const lClusterX = parseFloat(localCluster.style.left) || (stageW - lClusterW) / 2;
-      const lClusterY = parseFloat(localCluster.style.top) || (stageH - lClusterH) / 2;
+      // Moving localCluster right is equivalent to moving peerCluster left (invert delta)
+      const deltaX = (dragTarget === peerCluster) ? rawDx : -rawDx;
+      const deltaY = (dragTarget === peerCluster) ? rawDy : -rawDy;
 
-      const pClusterW = parseFloat(peerCluster.style.width) || 120;
-      const pClusterH = parseFloat(peerCluster.style.height) || 90;
-
-      let candX = initialX + (e.clientX - startX);
-      let candY = initialY + (e.clientY - startY);
-
-      candX = Math.max(6, Math.min(stageW - pClusterW - 6, candX));
-      candY = Math.max(6, Math.min(stageH - pClusterH - 6, candY));
-
-      const candCenterX = candX + pClusterW / 2;
-      const candCenterY = candY + pClusterH / 2;
-      const localCenterX = lClusterX + lClusterW / 2;
-      const localCenterY = lClusterY + lClusterH / 2;
-
-      const diffX = candCenterX - localCenterX;
-      const diffY = candCenterY - localCenterY;
-
-      let detectedSide = 'right';
+      let detectedSide = dragStartSide;
+      let candOffset = dragStartOffset;
       let snapText = '';
-      if (guideH) guideH.style.display = 'none';
-      if (guideV) guideV.style.display = 'none';
 
-      const gap = 10;
-      if (Math.abs(diffX) * lClusterH >= Math.abs(diffY) * lClusterW) {
-        detectedSide = diffX > 0 ? 'right' : 'left';
-        const dockX = (detectedSide === 'right') ? (lClusterX + lClusterW + gap) : (lClusterX - pClusterW - gap);
-        if (Math.abs(candX - dockX) < 24) {
-          candX = dockX;
-        }
-
-        const snapThreshold = 14;
-        const snapTop = lClusterY;
-        const snapCenter = lClusterY + (lClusterH - pClusterH) / 2;
-        const snapBottom = lClusterY + lClusterH - pClusterH;
-
-        if (Math.abs(candY - snapTop) < snapThreshold) {
-          candY = snapTop;
-          if (guideH) { guideH.style.top = lClusterY + 'px'; guideH.style.display = 'block'; }
-          snapText = 'Magnetic Snap: Tops Aligned';
-        } else if (Math.abs(candY - snapCenter) < snapThreshold) {
-          candY = snapCenter;
-          if (guideH) { guideH.style.top = (lClusterY + lClusterH / 2) + 'px'; guideH.style.display = 'block'; }
-          snapText = 'Magnetic Snap: Centers Aligned';
-        } else if (Math.abs(candY - snapBottom) < snapThreshold) {
-          candY = snapBottom;
-          if (guideH) { guideH.style.top = (lClusterY + lClusterH) + 'px'; guideH.style.display = 'block'; }
-          snapText = 'Magnetic Snap: Bottoms Aligned';
+      const isVert = (dragStartSide === 'left' || dragStartSide === 'right');
+      if (isVert) {
+        candOffset = dragStartOffset + deltaY;
+        // If dragged horizontally past 90px on canvas, switch side
+        if (Math.abs(deltaX * scale) > 90) {
+          detectedSide = deltaX > 0 ? 'right' : 'left';
         }
       } else {
-        detectedSide = diffY > 0 ? 'bottom' : 'top';
-        const dockY = (detectedSide === 'bottom') ? (lClusterY + lClusterH + gap) : (lClusterY - pClusterH - gap);
-        if (Math.abs(candY - dockY) < 24) {
-          candY = dockY;
-        }
-
-        const snapThreshold = 14;
-        const snapLeft = lClusterX;
-        const snapCenter = lClusterX + (lClusterW - pClusterW) / 2;
-        const snapRight = lClusterX + lClusterW - pClusterW;
-
-        if (Math.abs(candX - snapLeft) < snapThreshold) {
-          candX = snapLeft;
-          if (guideV) { guideV.style.left = lClusterX + 'px'; guideV.style.display = 'block'; }
-          snapText = 'Magnetic Snap: Lefts Aligned';
-        } else if (Math.abs(candX - snapCenter) < snapThreshold) {
-          candX = snapCenter;
-          if (guideV) { guideV.style.left = (lClusterX + lClusterW / 2) + 'px'; guideV.style.display = 'block'; }
-          snapText = 'Magnetic Snap: Centers Aligned';
-        } else if (Math.abs(candX - snapRight) < snapThreshold) {
-          candX = snapRight;
-          if (guideV) { guideV.style.left = (lClusterX + lClusterW) + 'px'; guideV.style.display = 'block'; }
-          snapText = 'Magnetic Snap: Rights Aligned';
+        candOffset = dragStartOffset + deltaX;
+        // If dragged vertically past 90px on canvas, switch side
+        if (Math.abs(deltaY * scale) > 90) {
+          detectedSide = deltaY > 0 ? 'bottom' : 'top';
         }
       }
 
-      candX = Math.max(6, Math.min(stageW - pClusterW - 6, candX));
-      candY = Math.max(6, Math.min(stageH - pClusterH - 6, candY));
+      // Magnetic snap
+      const snapPxThreshold = 14;
+      const snapDistanceThreshold = snapPxThreshold / scale;
+      if (detectedSide === 'top' || detectedSide === 'bottom') {
+        const snapLeft = 0;
+        const snapCenter = (lBounds.w - pBounds.w) / 2;
+        const snapRight = lBounds.w - pBounds.w;
 
-      peerCluster.style.left = candX + 'px';
-      peerCluster.style.top = candY + 'px';
+        if (Math.abs(candOffset - snapLeft) < snapDistanceThreshold) {
+          candOffset = snapLeft;
+          snapText = 'Magnetic Snap: Left Edges Aligned';
+        } else if (Math.abs(candOffset - snapCenter) < snapDistanceThreshold) {
+          candOffset = snapCenter;
+          snapText = 'Magnetic Snap: Centers Aligned';
+        } else if (Math.abs(candOffset - snapRight) < snapDistanceThreshold) {
+          candOffset = snapRight;
+          snapText = 'Magnetic Snap: Right Edges Aligned';
+        }
+      } else {
+        const snapTop = 0;
+        const snapCenter = (lBounds.h - pBounds.h) / 2;
+        const snapBottom = lBounds.h - pBounds.h;
+
+        if (Math.abs(candOffset - snapTop) < snapDistanceThreshold) {
+          candOffset = snapTop;
+          snapText = 'Magnetic Snap: Top Edges Aligned';
+        } else if (Math.abs(candOffset - snapCenter) < snapDistanceThreshold) {
+          candOffset = snapCenter;
+          snapText = 'Magnetic Snap: Centers Aligned';
+        } else if (Math.abs(candOffset - snapBottom) < snapDistanceThreshold) {
+          candOffset = snapBottom;
+          snapText = 'Magnetic Snap: Bottom Edges Aligned';
+        }
+      }
 
       if (snapBadge) {
         if (snapText) {
@@ -857,20 +838,18 @@ body.banner { background: transparent; overflow: hidden; }
         }
       }
 
-      let liveOffset = 0;
-      if (detectedSide === 'left' || detectedSide === 'right') {
-        liveOffset = (candY - lClusterY) / (layoutScale || 0.08);
-      } else {
-        liveOffset = (candX - lClusterX) / (layoutScale || 0.08);
-      }
-
-      sendLiveLayout(detectedSide, liveOffset);
+      curSide = detectedSide;
+      curOffset = Math.round(candOffset);
+      renderLayoutDesigner();
+      sendLiveLayout(curSide, curOffset);
     });
 
     const endDrag = () => {
       if (!isDragging) return;
       isDragging = false;
-      peerCluster.style.cursor = 'grab';
+      if (peerCluster) peerCluster.style.cursor = 'grab';
+      if (localCluster) localCluster.style.cursor = 'grab';
+      dragTarget = null;
       if (guideH) guideH.style.display = 'none';
       if (guideV) guideV.style.display = 'none';
       if (snapBadge) snapBadge.style.display = 'none';
