@@ -488,6 +488,45 @@ body.banner { background: transparent; overflow: hidden; }
     return { minX, minY, maxX, maxY, w: Math.max(100, maxX - minX), h: Math.max(100, maxY - minY) };
   }
 
+  function formatMonitorCard(d, fallbackName, isLocal, rx, ry, rw, rh) {
+    let rawName = (d.name || fallbackName || '').trim();
+    let name = rawName;
+    if (/built-in/i.test(name)) {
+      name = (isLocal && B.os === 'mac') || (!isLocal && B.os !== 'mac') ? 'Mac' : 'Built-in';
+    }
+    const inchStr = d.inches ? `${d.inches}"` : '';
+    const resStr = `${d.pixel_width || d.width}×${d.pixel_height || d.height}`;
+
+    const borderCol = isLocal ? '#007aff' : 'var(--accent)';
+    const bgCol = isLocal ? 'rgba(0,122,255,0.22)' : 'var(--accent-soft)';
+    const shadow = isLocal ? '0 2px 6px rgba(0,0,0,0.2)' : '0 3px 8px rgba(0,0,0,0.25)';
+
+    let contentHtml = '';
+    if (rw >= 110 && rh >= 42) {
+      const title = inchStr ? `${name} · ${inchStr}` : name;
+      contentHtml = `
+        <b style="font-size:10px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.2;">${title}</b>
+        <small style="font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.2;margin-top:2px;">${resStr}</small>
+      `;
+    } else if (rh >= 48) {
+      contentHtml = `
+        <b style="font-size:9.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.15;">${name}</b>
+        ${inchStr ? `<span style="font-size:8.5px;font-weight:500;color:var(--ink);opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.15;">${inchStr}</span>` : ''}
+        <small style="font-size:7.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.15;">${resStr}</small>
+      `;
+    } else {
+      const title = inchStr ? `${name} ${inchStr}` : name;
+      contentHtml = `
+        <b style="font-size:9px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.1;">${title}</b>
+        <small style="font-size:7.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96%;line-height:1.1;">${resStr}</small>
+      `;
+    }
+
+    return `<div title="${rawName} ${inchStr} (${resStr})" style="position:absolute;left:${rx}px;top:${ry}px;width:${rw}px;height:${rh}px;border:2px solid ${borderCol};background:${bgCol};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;box-shadow:${shadow};overflow:hidden;padding:2px 3px;box-sizing:border-box;user-select:none;-webkit-user-select:none;">
+      ${contentHtml}
+    </div>`;
+  }
+
   function renderLayoutDesigner() {
     if (!stage || !localCluster || !peerCluster) return;
     const stageW = stage.clientWidth || 450;
@@ -502,10 +541,12 @@ body.banner { background: transparent; overflow: hidden; }
     lBounds = getBounds(cleanLocal, 2560, 1664);
     pBounds = getBounds(cleanPeer, 2560, 1440);
 
-    const maxNeededW = lBounds.w + pBounds.w + 120;
-    const maxNeededH = Math.max(lBounds.h, pBounds.h) * 1.5;
-    layoutScale = Math.min((stageW - 40) / maxNeededW, (stageH - 40) / Math.max(maxNeededH, 1200));
-    layoutScale = Math.max(0.015, Math.min(0.12, layoutScale));
+    const isSideBySide = (curSide === 'left' || curSide === 'right');
+    const neededW = isSideBySide ? (lBounds.w + pBounds.w + 100) : (Math.max(lBounds.w, pBounds.w) + 60);
+    const neededH = isSideBySide ? (Math.max(lBounds.h, pBounds.h) + 60) : (lBounds.h + pBounds.h + 80);
+
+    layoutScale = Math.min((stageW - 36) / Math.max(neededW, 600), (stageH - 36) / Math.max(neededH, 500));
+    layoutScale = Math.max(0.02, Math.min(0.12, layoutScale));
 
     const lClusterW = Math.round(lBounds.w * layoutScale);
     const lClusterH = Math.round(lBounds.h * layoutScale);
@@ -519,12 +560,9 @@ body.banner { background: transparent; overflow: hidden; }
     localCluster.innerHTML = lDs.map((d) => {
       const rx = Math.round(((d.x || 0) - lBounds.minX) * layoutScale);
       const ry = Math.round(((d.y || 0) - lBounds.minY) * layoutScale);
-      const rw = Math.max(45, Math.round((d.width || 2560) * layoutScale));
-      const rh = Math.max(32, Math.round((d.height || 1664) * layoutScale));
-      return `<div style="position:absolute;left:${rx}px;top:${ry}px;width:${rw}px;height:${rh}px;border:2px solid #007aff;background:rgba(0,122,255,0.22);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.2);overflow:hidden;padding:1px;user-select:none;-webkit-user-select:none;">
-        <b style="font-size:10px;color:var(--ink);white-space:nowrap;">${d.name || myName} ${d.inches ? d.inches + '"' : ''}</b>
-        <small style="font-size:8.5px;color:var(--muted);white-space:nowrap;">${d.pixel_width || d.width}×${d.pixel_height || d.height}</small>
-      </div>`;
+      const rw = Math.max(54, Math.round((d.width || 2560) * layoutScale));
+      const rh = Math.max(36, Math.round((d.height || 1664) * layoutScale));
+      return formatMonitorCard(d, myName, true, rx, ry, rw, rh);
     }).join('');
 
     // Render peer monitors
@@ -534,12 +572,9 @@ body.banner { background: transparent; overflow: hidden; }
     peerCluster.innerHTML = pDs.map((d) => {
       const rx = Math.round(((d.x || 0) - pBounds.minX) * layoutScale);
       const ry = Math.round(((d.y || 0) - pBounds.minY) * layoutScale);
-      const rw = Math.max(45, Math.round((d.width || 2560) * layoutScale));
-      const rh = Math.max(32, Math.round((d.height || 1440) * layoutScale));
-      return `<div style="position:absolute;left:${rx}px;top:${ry}px;width:${rw}px;height:${rh}px;border:2px solid var(--accent);background:var(--accent-soft);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;box-shadow:0 3px 8px rgba(0,0,0,0.25);overflow:hidden;padding:1px;user-select:none;-webkit-user-select:none;">
-        <b style="font-size:10px;color:var(--ink);white-space:nowrap;">${d.name || peerName} ${d.inches ? d.inches + '"' : ''}</b>
-        <small style="font-size:8.5px;color:var(--muted);white-space:nowrap;">${d.pixel_width || d.width}×${d.pixel_height || d.height}</small>
-      </div>`;
+      const rw = Math.max(54, Math.round((d.width || 2560) * layoutScale));
+      const rh = Math.max(36, Math.round((d.height || 1440) * layoutScale));
+      return formatMonitorCard(d, peerName, false, rx, ry, rw, rh);
     }).join('');
 
     // Placement of clusters relative to each other
@@ -633,12 +668,14 @@ body.banner { background: transparent; overflow: hidden; }
     const locItems = $('#local-disp-items');
     if (locItems) {
       if (localDisplays.length) {
-        locItems.innerHTML = localDisplays.map((d) =>
-          `<div style="display:flex;justify-content:space-between;padding:2px 0;">
-            <span>🖥️ <b>${d.name || 'Display'}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width || d.width}×${d.pixel_height || d.height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
+        locItems.innerHTML = localDisplays.map((d) => {
+          let name = d.name || 'Display';
+          if (/built-in/i.test(name)) name = B.os === 'mac' ? 'Mac (Built-in)' : 'Built-in';
+          return `<div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span>🖥️ <b>${name}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width || d.width}×${d.pixel_height || d.height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
             <span style="opacity:0.75;font-variant-numeric:tabular-nums;">Pos: (${Math.round(d.x || 0)}, ${Math.round(d.y || 0)})</span>
-          </div>`
-        ).join('');
+          </div>`;
+        }).join('');
       } else {
         locItems.textContent = '1 display detected';
       }
@@ -652,12 +689,14 @@ body.banner { background: transparent; overflow: hidden; }
     const pItems = $('#peer-disp-items');
     if (pItems) {
       if (peerDisplays.length) {
-        pItems.innerHTML = peerDisplays.map((d) =>
-          `<div style="display:flex;justify-content:space-between;padding:2px 0;">
-            <span>🖥️ <b>${d.name || 'Display'}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width || d.width}×${d.pixel_height || d.height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
+        pItems.innerHTML = peerDisplays.map((d) => {
+          let name = d.name || 'Display';
+          if (/built-in/i.test(name)) name = B.os === 'mac' ? 'PC (Built-in)' : 'Mac (Built-in)';
+          return `<div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span>🖥️ <b>${name}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width || d.width}×${d.pixel_height || d.height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
             <span style="opacity:0.75;font-variant-numeric:tabular-nums;">Pos: (${Math.round(d.x || 0)}, ${Math.round(d.y || 0)})</span>
-          </div>`
-        ).join('');
+          </div>`;
+        }).join('');
       } else {
         pItems.textContent = m.connected ? 'Waiting for display info…' : 'Connect to see monitors';
       }

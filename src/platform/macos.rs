@@ -561,7 +561,8 @@ impl Platform for Mac {
         let main_id = unsafe { CGMainDisplayID() };
         ids[..n as usize]
             .iter()
-            .map(|&d| {
+            .enumerate()
+            .map(|(idx, &d)| {
                 let r = unsafe { CGDisplayBounds(d) };
                 let size_mm = unsafe { CGDisplayScreenSize(d) };
                 let (w_mm, h_mm) = if size_mm.w > 0.0 && size_mm.h > 0.0 {
@@ -589,9 +590,9 @@ impl Platform for Mac {
                 let is_builtin = unsafe { CGDisplayIsBuiltin(d) } != 0;
                 let is_primary = d == main_id;
                 let name = if is_builtin {
-                    "Built-in Display".to_string()
+                    "Mac".to_string()
                 } else {
-                    format!("External Display {d}")
+                    format!("Display {}", idx + 1)
                 };
                 crate::proto::DisplayInfo {
                     id: d as u64,
