@@ -36,7 +36,9 @@ pub enum Ui {
     Quit,
     /// Settings changed elsewhere; re-report status.
     Refresh,
+    #[allow(dead_code)]
     PeerSideChanged(crate::proto::Side),
+    PeerLayoutChanged { side: crate::proto::Side, offset: f64 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -223,6 +225,13 @@ impl Engine {
             Ui::PeerSideChanged(side) => {
                 if self.connected {
                     self.net.send(&Msg::PeerSide(side));
+                } else {
+                    self.pending_peer_side = Some(side);
+                }
+            }
+            Ui::PeerLayoutChanged { side, offset } => {
+                if self.connected {
+                    self.net.send(&Msg::PeerLayout { side, offset });
                 } else {
                     self.pending_peer_side = Some(side);
                 }
@@ -457,15 +466,36 @@ impl Engine {
                     self.report();
                 }
             }
+            Msg::PeerLayout { side, offset } => {
+                if !offset.is_finite() || offset.abs() > 20000.0 {
+                    log::warn!("ignoring invalid layout offset {offset}");
+                    return;
+                }
+                self.pending_peer_side = None;
+                let opposite = side.opposite();
+                let inv_offset = -offset;
+                log::info!("peer reported layout: {side:?} offset {offset}, updating our layout to {opposite:?} offset {inv_offset}");
+                let mut c = self.cfg.write().unwrap();
+                if c.peer_side != opposite || (c.peer_offset - inv_offset).abs() > 0.1 {
+                    c.peer_side = opposite;
+                    c.peer_offset = inv_offset;
+                    c.save();
+                    drop(c);
+                    self.report();
+                }
+            }
             Msg::Enter { frac } => {
                 if self.mode == Mode::Controlling {
                     // Both pushed at once; the newcomer wins.
                     self.plat.set_capturing(false);
                 }
-                let side = self.cfg.read().unwrap().peer_side;
+                let (side, offset) = {
+                    let c = self.cfg.read().unwrap();
+                    (c.peer_side, c.peer_offset)
+                };
                 let ds = self.displays().to_vec();
                 let p = match frac {
-                    Some(f) => geometry::entry_point(&ds, side, f),
+                    Some(f) => geometry::entry_point_with_offset(&ds, side, f, offset),
                     None => geometry::center(&ds),
                 };
                 self.pos = p;
@@ -482,9 +512,12 @@ impl Engine {
                     self.plat.set_capturing(false);
                     self.mode = Mode::Controlled;
                     if let Some(f) = frac {
-                        let side = self.cfg.read().unwrap().peer_side;
+                        let (side, offset) = {
+                            let c = self.cfg.read().unwrap();
+                            (c.peer_side, c.peer_offset)
+                        };
                         let ds = self.displays().to_vec();
-                        let (x, y) = geometry::entry_point(&ds, side, f);
+                        let (x, y) = geometry::entry_point_with_offset(&ds, side, f, offset);
                         self.pos = (x, y);
                         self.plat.warp(x, y);
                     }
@@ -494,9 +527,12 @@ impl Engine {
                     self.go_local();
                     if was == Mode::Controlling {
                         if let Some(f) = frac {
-                            let side = self.cfg.read().unwrap().peer_side;
+                            let (side, offset) = {
+                                let c = self.cfg.read().unwrap();
+                                (c.peer_side, c.peer_offset)
+                            };
                             let ds = self.displays().to_vec();
-                            let (x, y) = geometry::entry_point(&ds, side, f);
+                            let (x, y) = geometry::entry_point_with_offset(&ds, side, f, offset);
                             self.plat.warp(x, y);
                         }
                     } else if was == Mode::Controlled {

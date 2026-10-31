@@ -421,15 +421,32 @@ impl App {
         if key == "paused" {
             let _ = self.tx.send(Event::Ui(Ui::Refresh));
         }
-        if key == "peer_side" {
-            let side = self.cfg.read().unwrap().peer_side;
-            let _ = self.tx.send(Event::Ui(Ui::PeerSideChanged(side)));
+        if key == "peer_side" || key == "peer_offset" {
+            let (side, offset) = {
+                let c = self.cfg.read().unwrap();
+                (c.peer_side, c.peer_offset)
+            };
+            let _ = self.tx.send(Event::Ui(Ui::PeerLayoutChanged { side, offset }));
         }
     }
 
     fn ipc(&mut self, target: &EventLoopWindowTarget<UserEvent>, page: Page, body: &str) {
         let Ok(m) = serde_json::from_str::<Value>(body) else { return };
         match m["cmd"].as_str().unwrap_or("") {
+            "setLayout" => {
+                if let (Some(side_str), Some(offset)) = (m["side"].as_str(), m["offset"].as_f64()) {
+                    let side_val = serde_json::Value::String(side_str.to_string());
+                    if let Ok(side) = serde_json::from_value::<crate::proto::Side>(side_val) {
+                        let mut c = self.cfg.write().unwrap();
+                        c.peer_side = side;
+                        c.peer_offset = offset;
+                        c.save();
+                        drop(c);
+                        let _ = self.tx.send(Event::Ui(Ui::PeerLayoutChanged { side, offset }));
+                        self.refresh(Page::Settings);
+                    }
+                }
+            }
             "ready" => {
                 if page == Page::Banner {
                     if let Some(msg) = PENDING_BANNER.lock().unwrap().take() {

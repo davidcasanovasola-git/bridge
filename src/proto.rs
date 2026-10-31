@@ -89,6 +89,8 @@ pub enum Msg {
     Clipboard(Clip),
     /// The sender changed which side this machine sits on; recipient sets the opposite side.
     PeerSide(Side),
+    /// Complete layout change with relative offset along the border.
+    PeerLayout { side: Side, offset: f64 },
     /// Local machine's active displays topology, resolutions, scale and physical inches.
     Displays(Vec<DisplayInfo>),
 }

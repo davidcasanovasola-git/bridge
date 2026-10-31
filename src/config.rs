@@ -30,6 +30,8 @@ pub struct Config {
     pub peer: Option<Peer>,
     /// Which edge of this machine's screens the other machine sits beyond.
     pub peer_side: Side,
+    /// Offset along the shared border (in pixels) of the other machine's screens.
+    pub peer_offset: f64,
     /// How far (in pixels) you have to push into the edge before crossing.
     pub edge_resistance: f64,
     /// Pause edge crossing; the hotkey still works.
@@ -72,6 +74,7 @@ impl Default for Config {
             public_key: String::new(),
             peer: None,
             peer_side: if mac { Side::Right } else { Side::Left },
+            peer_offset: 0.0,
             edge_resistance: 30.0,
             paused: false,
             incoming_pointer_scale: 1.0,

@@ -191,13 +191,67 @@ body.banner { background: transparent; overflow: hidden; }
   <div class="list"><div class="item peer"><span class="dot" id="peer-dot"></span><div class="t"><b id="peer-name">Not paired</b><small id="peer-sub"></small></div>
     <button class="btn" data-open="pair" id="pair-btn">Pair…</button><button class="btn danger" id="unpair" hidden>Unpair</button></div></div>
 
-  <h2>Where is the other machine?</h2>
-  <div class="list layout"><div class="pad">
-    <button class="side top" data-side="top">Above</button><button class="side bottom" data-side="bottom">Below</button>
-    <button class="side left" data-side="left">Left</button><button class="side right" data-side="right">Right</button>
-    <div class="me" id="me-label">This Mac</div></div></div>
+  <h2>Screen Arrangement &amp; Alignment</h2>
+  <div class="list" style="padding:14px;background:var(--card);border-radius:14px;border:1px solid var(--line);margin-bottom:14px;">
+    <!-- Interactive Canvas Stage -->
+    <div id="layout-stage" style="position:relative;width:100%;height:220px;border-radius:12px;background:rgba(0,0,0,0.12);border:1px dashed var(--line);overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;">
+      
+      <!-- Magnetic Snap Guideline Indicators -->
+      <div id="snap-guide-h" style="position:absolute;left:0;right:0;height:1px;background:var(--accent);display:none;pointer-events:none;z-index:10;box-shadow:0 0 6px var(--accent);"></div>
+      <div id="snap-guide-v" style="position:absolute;top:0;bottom:0;width:1px;background:var(--accent);display:none;pointer-events:none;z-index:10;box-shadow:0 0 6px var(--accent);"></div>
 
-  <h2>Displays &amp; Layout</h2>
+      <!-- Local Machine Screen Representation -->
+      <div id="canvas-local" style="position:absolute;border-radius:8px;border:2px solid #007aff;background:rgba(0,122,255,0.18);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);pointer-events:none;z-index:2;">
+        <b id="canvas-local-name" style="font-size:12px;color:var(--ink);">This Mac</b>
+        <small id="canvas-local-sub" style="font-size:10.5px;color:var(--muted);white-space:nowrap;">13.6" (2560×1664)</small>
+      </div>
+
+      <!-- Peer Machine Draggable Screen Representation -->
+      <div id="canvas-peer" style="position:absolute;border-radius:8px;border:2px solid var(--accent);background:var(--accent-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:4px;box-shadow:0 4px 14px rgba(0,0,0,0.25);cursor:grab;z-index:5;transition:border-color .15s, box-shadow .15s;">
+        <b id="canvas-peer-name" style="font-size:12px;color:var(--ink);">ORDENADOR</b>
+        <small id="canvas-peer-sub" style="font-size:10.5px;color:var(--muted);white-space:nowrap;">23.8" (1920×1080)</small>
+      </div>
+
+      <!-- Live Snap Notification Overlay -->
+      <div id="snap-badge" style="position:absolute;bottom:8px;padding:3px 10px;border-radius:99px;background:rgba(0,0,0,0.7);color:#fff;font-size:11px;font-weight:600;display:none;z-index:20;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">Magnetic Snap</div>
+    </div>
+
+    <!-- Quick Presets and Edge Selectors -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap;">
+      <div class="row" style="gap:4px;">
+        <span style="font-size:12px;color:var(--muted);font-weight:600;margin-right:2px;">Side:</span>
+        <button class="btn side-btn" style="min-height:28px;padding:0 10px;font-size:12px;" data-side="left">Left</button>
+        <button class="btn side-btn" style="min-height:28px;padding:0 10px;font-size:12px;" data-side="right">Right</button>
+        <button class="btn side-btn" style="min-height:28px;padding:0 10px;font-size:12px;" data-side="top">Above</button>
+        <button class="btn side-btn" style="min-height:28px;padding:0 10px;font-size:12px;" data-side="bottom">Below</button>
+      </div>
+
+      <div class="row" style="gap:4px;" id="align-presets">
+        <span style="font-size:12px;color:var(--muted);font-weight:600;margin-right:2px;">Snap:</span>
+        <button class="btn" id="btn-align-start" style="min-height:28px;padding:0 9px;font-size:12px;" title="Align Tops / Lefts">⤒ Top</button>
+        <button class="btn" id="btn-align-center" style="min-height:28px;padding:0 9px;font-size:12px;" title="Center Align">⬍ Center</button>
+        <button class="btn" id="btn-align-end" style="min-height:28px;padding:0 9px;font-size:12px;" title="Align Bottoms / Rights">⤓ Bottom</button>
+      </div>
+    </div>
+
+    <!-- Manual Fine-Tuning Controls -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);gap:10px;flex-wrap:wrap;">
+      <div style="display:flex;flex-direction:column;">
+        <b style="font-size:12.5px;">Fine-tuning offset</b>
+        <small style="color:var(--muted);font-size:11px;" id="offset-sub">Drag screen or use buttons for exact pixel alignment</small>
+      </div>
+      <div class="row" style="gap:5px;">
+        <button class="btn" id="btn-fine-sub-10" style="min-height:30px;padding:0 8px;font-size:11px;" title="-10 px">-10</button>
+        <button class="btn" id="btn-fine-sub-1" style="min-height:30px;padding:0 8px;font-size:11px;" title="-1 px">-1</button>
+        <input type="number" id="offset-val-input" style="width:64px;height:30px;text-align:center;border-radius:8px;border:1.5px solid var(--line);background:var(--field);font-weight:600;font-size:12px;" value="0">
+        <button class="btn" id="btn-fine-add-1" style="min-height:30px;padding:0 8px;font-size:11px;" title="+1 px">+1</button>
+        <button class="btn" id="btn-fine-add-10" style="min-height:30px;padding:0 8px;font-size:11px;" title="+10 px">+10</button>
+        <button class="btn" id="btn-fine-zero" style="min-height:30px;padding:0 8px;font-size:11px;" title="Reset to 0">0</button>
+      </div>
+    </div>
+  </div>
+
+  <h2>Displays &amp; Specifications</h2>
   <div class="list" id="displays-list" style="font-size:12.5px;padding:10px 14px;background:rgba(128,128,128,0.08);border-radius:10px;margin-bottom:14px;">
     <div id="local-displays-box" style="margin-bottom:10px;">
       <div style="font-weight:600;margin-bottom:4px;" id="local-disp-title">This Machine</div>
@@ -408,6 +462,11 @@ body.banner { background: transparent; overflow: hidden; }
     const locItems = $('#local-disp-items');
     if (locItems) {
       if (m.local_displays && m.local_displays.length) {
+        curLocalDisp = m.local_displays[0];
+        const clName = $('#canvas-local-name');
+        const clSub = $('#canvas-local-sub');
+        if (clName) clName.textContent = myName;
+        if (clSub && curLocalDisp) clSub.textContent = `${curLocalDisp.inches}" (${curLocalDisp.pixel_width}×${curLocalDisp.pixel_height})`;
         locItems.innerHTML = m.local_displays.map((d) =>
           `<div style="display:flex;justify-content:space-between;padding:2px 0;">
             <span>🖥️ <b>${d.name || 'Display'}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width}×${d.pixel_height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
@@ -426,6 +485,11 @@ body.banner { background: transparent; overflow: hidden; }
     const pItems = $('#peer-disp-items');
     if (pItems) {
       if (m.peer_displays && m.peer_displays.length) {
+        curPeerDisp = m.peer_displays[0];
+        const cpName = $('#canvas-peer-name');
+        const cpSub = $('#canvas-peer-sub');
+        if (cpName) cpName.textContent = peerName;
+        if (cpSub && curPeerDisp) cpSub.textContent = `${curPeerDisp.inches}" (${curPeerDisp.pixel_width}×${curPeerDisp.pixel_height})`;
         pItems.innerHTML = m.peer_displays.map((d) =>
           `<div style="display:flex;justify-content:space-between;padding:2px 0;">
             <span>🖥️ <b>${d.name || 'Display'}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width}×${d.pixel_height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
@@ -436,7 +500,263 @@ body.banner { background: transparent; overflow: hidden; }
         pItems.textContent = m.connected ? 'Waiting for display info…' : 'Connect to see monitors';
       }
     }
+
+    curSide = cfg.peer_side || 'right';
+    curOffset = cfg.peer_offset || 0;
+    renderLayoutDesigner();
   };
+
+  // Visual Layout Designer State & Controller
+  let curSide = 'right';
+  let curOffset = 0;
+  let curLocalDisp = null;
+  let curPeerDisp = null;
+  let canvasScale = 0.22;
+
+  const stage = $('#layout-stage');
+  const localBox = $('#canvas-local');
+  const peerBox = $('#canvas-peer');
+  const guideH = $('#snap-guide-h');
+  const guideV = $('#snap-guide-v');
+  const snapBadge = $('#snap-badge');
+  const offsetInput = $('#offset-val-input');
+  const offsetSub = $('#offset-sub');
+
+  function renderLayoutDesigner() {
+    if (!stage || !localBox || !peerBox) return;
+    const stageW = stage.clientWidth || 400;
+    const stageH = stage.clientHeight || 220;
+
+    const localWmm = (curLocalDisp && curLocalDisp.width_mm) || 290;
+    const localHmm = (curLocalDisp && curLocalDisp.height_mm) || 189;
+    const peerWmm = (curPeerDisp && curPeerDisp.width_mm) || (curPeerDisp ? 530 : 290);
+    const peerHmm = (curPeerDisp && curPeerDisp.height_mm) || (curPeerDisp ? 300 : 189);
+
+    const maxDimension = Math.max(localWmm + peerWmm, (localHmm + peerHmm) * 1.4, 600);
+    canvasScale = Math.min((stageW - 140) / maxDimension, (stageH - 50) / Math.max(localHmm, peerHmm, 300));
+    if (canvasScale <= 0) canvasScale = 0.22;
+
+    const localW = Math.max(80, Math.round(localWmm * canvasScale));
+    const localH = Math.max(55, Math.round(localHmm * canvasScale));
+    const peerW = Math.max(80, Math.round(peerWmm * canvasScale));
+    const peerH = Math.max(55, Math.round(peerHmm * canvasScale));
+
+    const cx = Math.round(stageW / 2);
+    const cy = Math.round(stageH / 2);
+
+    const localLeft = cx - Math.round(localW / 2);
+    const localTop = cy - Math.round(localH / 2);
+    const localRight = localLeft + localW;
+    const localBottom = localTop + localH;
+
+    localBox.style.width = localW + 'px';
+    localBox.style.height = localH + 'px';
+    localBox.style.left = localLeft + 'px';
+    localBox.style.top = localTop + 'px';
+
+    peerBox.style.width = peerW + 'px';
+    peerBox.style.height = peerH + 'px';
+
+    const offsetOnCanvas = Math.round((curOffset || 0) * canvasScale);
+    let peerX = 0;
+    let peerY = 0;
+
+    if (curSide === 'right') {
+      peerX = localRight + 4;
+      peerY = localTop + offsetOnCanvas;
+    } else if (curSide === 'left') {
+      peerX = localLeft - peerW - 4;
+      peerY = localTop + offsetOnCanvas;
+    } else if (curSide === 'top') {
+      peerX = localLeft + offsetOnCanvas;
+      peerY = localTop - peerH - 4;
+    } else if (curSide === 'bottom') {
+      peerX = localLeft + offsetOnCanvas;
+      peerY = localBottom + 4;
+    }
+
+    peerBox.style.left = peerX + 'px';
+    peerBox.style.top = peerY + 'px';
+
+    $$('.side-btn').forEach((b) => b.classList.toggle('primary', b.dataset.side === curSide));
+
+    const isVert = (curSide === 'left' || curSide === 'right');
+    const bStart = $('#btn-align-start');
+    const bEnd = $('#btn-align-end');
+    if (bStart) bStart.textContent = isVert ? '⤒ Top' : '⇤ Left';
+    if (bEnd) bEnd.textContent = isVert ? '⤓ Bottom' : '⇥ Right';
+
+    if (offsetInput) offsetInput.value = Math.round(curOffset || 0);
+    if (offsetSub) {
+      const sideText = curSide.charAt(0).toUpperCase() + curSide.slice(1);
+      offsetSub.textContent = `${sideText} side · Offset: ${Math.round(curOffset || 0)} px`;
+    }
+  }
+
+  function commitLayout(side, offset) {
+    curSide = side;
+    curOffset = Math.round(offset);
+    renderLayoutDesigner();
+    send({ cmd: 'setLayout', side: curSide, offset: curOffset });
+  }
+
+  if (peerBox && stage) {
+    let dragging = false;
+    let startX = 0, startY = 0;
+    let initialX = 0, initialY = 0;
+
+    peerBox.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      peerBox.setPointerCapture(e.pointerId);
+      peerBox.style.cursor = 'grabbing';
+      startX = e.clientX;
+      startY = e.clientY;
+      initialX = parseFloat(peerBox.style.left) || 0;
+      initialY = parseFloat(peerBox.style.top) || 0;
+      e.preventDefault();
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const stageW = stage.clientWidth || 400;
+      const stageH = stage.clientHeight || 220;
+      const cx = Math.round(stageW / 2);
+      const cy = Math.round(stageH / 2);
+
+      const localW = parseFloat(localBox.style.width) || 100;
+      const localH = parseFloat(localBox.style.height) || 80;
+      const localLeft = cx - Math.round(localW / 2);
+      const localTop = cy - Math.round(localH / 2);
+      const localRight = localLeft + localW;
+      const localBottom = localTop + localH;
+
+      const peerW = parseFloat(peerBox.style.width) || 100;
+      const peerH = parseFloat(peerBox.style.height) || 80;
+
+      let candX = initialX + (e.clientX - startX);
+      let candY = initialY + (e.clientY - startY);
+
+      const candCenterX = candX + peerW / 2;
+      const candCenterY = candY + peerH / 2;
+      const diffX = candCenterX - cx;
+      const diffY = candCenterY - cy;
+
+      let detectedSide = 'right';
+      let snapText = '';
+      if (guideH) guideH.style.display = 'none';
+      if (guideV) guideV.style.display = 'none';
+
+      if (Math.abs(diffX) >= Math.abs(diffY)) {
+        detectedSide = diffX > 0 ? 'right' : 'left';
+        candX = (detectedSide === 'right') ? (localRight + 4) : (localLeft - peerW - 4);
+
+        const snapThreshold = 10;
+        const snapTop = localTop;
+        const snapCenter = localTop + (localH - peerH) / 2;
+        const snapBottom = localTop + localH - peerH;
+
+        if (Math.abs(candY - snapTop) < snapThreshold) {
+          candY = snapTop;
+          if (guideH) { guideH.style.top = localTop + 'px'; guideH.style.display = 'block'; }
+          snapText = 'Magnetic Snap: Tops Aligned';
+        } else if (Math.abs(candY - snapCenter) < snapThreshold) {
+          candY = snapCenter;
+          if (guideH) { guideH.style.top = (localTop + localH / 2) + 'px'; guideH.style.display = 'block'; }
+          snapText = 'Magnetic Snap: Centers Aligned';
+        } else if (Math.abs(candY - snapBottom) < snapThreshold) {
+          candY = snapBottom;
+          if (guideH) { guideH.style.top = localBottom + 'px'; guideH.style.display = 'block'; }
+          snapText = 'Magnetic Snap: Bottoms Aligned';
+        }
+      } else {
+        detectedSide = diffY > 0 ? 'bottom' : 'top';
+        candY = (detectedSide === 'bottom') ? (localBottom + 4) : (localTop - peerH - 4);
+
+        const snapThreshold = 10;
+        const snapLeft = localLeft;
+        const snapCenter = localLeft + (localW - peerW) / 2;
+        const snapRight = localLeft + localW - peerW;
+
+        if (Math.abs(candX - snapLeft) < snapThreshold) {
+          candX = snapLeft;
+          if (guideV) { guideV.style.left = localLeft + 'px'; guideV.style.display = 'block'; }
+          snapText = 'Magnetic Snap: Lefts Aligned';
+        } else if (Math.abs(candX - snapCenter) < snapThreshold) {
+          candX = snapCenter;
+          if (guideV) { guideV.style.left = (localLeft + localW / 2) + 'px'; guideV.style.display = 'block'; }
+          snapText = 'Magnetic Snap: Centers Aligned';
+        } else if (Math.abs(candX - snapRight) < snapThreshold) {
+          candX = snapRight;
+          if (guideV) { guideV.style.left = localRight + 'px'; guideV.style.display = 'block'; }
+          snapText = 'Magnetic Snap: Rights Aligned';
+        }
+      }
+
+      peerBox.style.left = candX + 'px';
+      peerBox.style.top = candY + 'px';
+
+      if (snapBadge) {
+        if (snapText) {
+          snapBadge.textContent = snapText;
+          snapBadge.style.display = 'block';
+        } else {
+          snapBadge.style.display = 'none';
+        }
+      }
+
+      let liveOffset = 0;
+      if (detectedSide === 'left' || detectedSide === 'right') {
+        liveOffset = (candY - localTop) / (canvasScale || 0.22);
+      } else {
+        liveOffset = (candX - localLeft) / (canvasScale || 0.22);
+      }
+
+      curSide = detectedSide;
+      curOffset = Math.round(liveOffset);
+
+      $$('.side-btn').forEach((b) => b.classList.toggle('primary', b.dataset.side === curSide));
+      if (offsetInput) offsetInput.value = curOffset;
+      if (offsetSub) offsetSub.textContent = `${curSide.toUpperCase()} side · Offset: ${curOffset} px`;
+    });
+
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      peerBox.style.cursor = 'grab';
+      if (guideH) guideH.style.display = 'none';
+      if (guideV) guideV.style.display = 'none';
+      if (snapBadge) snapBadge.style.display = 'none';
+      commitLayout(curSide, curOffset);
+    };
+
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
+  }
+
+  // Presets and Fine Tuning Listeners
+  $('#btn-align-start')?.addEventListener('click', () => commitLayout(curSide, 0));
+  $('#btn-align-center')?.addEventListener('click', () => {
+    const isVert = (curSide === 'left' || curSide === 'right');
+    const localDim = isVert ? ((curLocalDisp?.height_mm || 189) - (curPeerDisp?.height_mm || 300)) / 2 : ((curLocalDisp?.width_mm || 290) - (curPeerDisp?.width_mm || 530)) / 2;
+    commitLayout(curSide, Math.round(localDim / 0.264583));
+  });
+  $('#btn-align-end')?.addEventListener('click', () => {
+    const isVert = (curSide === 'left' || curSide === 'right');
+    const localDim = isVert ? ((curLocalDisp?.height_mm || 189) - (curPeerDisp?.height_mm || 300)) : ((curLocalDisp?.width_mm || 290) - (curPeerDisp?.width_mm || 530));
+    commitLayout(curSide, Math.round(localDim / 0.264583));
+  });
+
+  $('#btn-fine-sub-10')?.addEventListener('click', () => commitLayout(curSide, curOffset - 10));
+  $('#btn-fine-sub-1')?.addEventListener('click', () => commitLayout(curSide, curOffset - 1));
+  $('#btn-fine-add-1')?.addEventListener('click', () => commitLayout(curSide, curOffset + 1));
+  $('#btn-fine-add-10')?.addEventListener('click', () => commitLayout(curSide, curOffset + 10));
+  $('#btn-fine-zero')?.addEventListener('click', () => commitLayout(curSide, 0));
+
+  if (offsetInput) {
+    offsetInput.addEventListener('change', () => commitLayout(curSide, +offsetInput.value || 0));
+  }
+
+  $$('.side-btn').forEach((b) => b.addEventListener('click', () => commitLayout(b.dataset.side, curOffset)));
 
   /* About */
   handlers.about = (m) => { $('#about-ver').textContent = 'Version ' + m.version; };

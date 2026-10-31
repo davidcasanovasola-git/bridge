@@ -70,11 +70,17 @@ pub fn frac_along(ds: &[Rect], x: f64, y: f64, side: Side) -> f64 {
 }
 
 /// Where a pointer arriving through the edge facing `side`, at `frac` along it, should land.
+#[allow(dead_code)]
 pub fn entry_point(ds: &[Rect], side: Side, frac: f64) -> (f64, f64) {
+    entry_point_with_offset(ds, side, frac, 0.0)
+}
+
+/// Where a pointer arriving through the edge facing `side`, at `frac` along it plus a fine-tuned pixel offset, should land.
+pub fn entry_point_with_offset(ds: &[Rect], side: Side, frac: f64, offset: f64) -> (f64, f64) {
     let b = bounds(ds);
     let inset = 2.0;
     let vertical = matches!(side, Side::Left | Side::Right);
-    let c = if vertical { b.y + frac * b.h } else { b.x + frac * b.w };
+    let c = (if vertical { b.y + frac * b.h } else { b.x + frac * b.w }) + offset;
     let spans: Vec<&Rect> = ds
         .iter()
         .filter(|r| if vertical { c >= r.y && c < r.bottom() } else { c >= r.x && c < r.right() })
