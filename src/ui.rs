@@ -282,11 +282,19 @@ impl App {
                 window.set_outer_position(LogicalPosition::new(mp.x + (ms.width - w) / 2.0, mp.y + (ms.height - h) / 2.5));
             }
         }
+        let state = match page {
+            Page::Welcome => self.welcome_state(),
+            Page::Settings => self.settings_state(),
+            Page::About => json!({"type": "about", "version": env!("CARGO_PKG_VERSION")}),
+            Page::Pair => json!({"type": "me", "name": crate::machine_name(), "ip": pair::local_ip().map(|i| i.to_string())}),
+            Page::Banner => json!({}),
+        };
         let init = json!({
             "page": page.name(),
             "os": os_name(),
             "icon": format!("data:image/png;base64,{}", base64_encode(APP_ICON)),
             "autoCheck": page == Page::About,
+            "state": state,
         });
         let proxy = PROXY.get().unwrap().lock().unwrap().clone();
         let built = WebViewBuilder::new_with_web_context(&mut self.web_context)
@@ -340,7 +348,9 @@ impl App {
 
     fn send(&self, page: Page, v: &Value) {
         if let Some(p) = self.panels.get(&page) {
-            let _ = p.webview.evaluate_script(&format!("window.bridge && window.bridge.recv({v})"));
+            if let Err(e) = p.webview.evaluate_script(&format!("window.bridge && window.bridge.recv({v})")) {
+                log::warn!("evaluate_script failed for {page:?}: {e}");
+            }
         }
     }
 

@@ -417,6 +417,7 @@ body.banner { background: transparent; overflow: hidden; }
   let cfg = {};
   let curSide = 'right';
   let curOffset = 0;
+  let curPeer = null;
   let localDisplays = [];
   let peerDisplays = [];
   let layoutScale = 0.08;
@@ -493,7 +494,7 @@ body.banner { background: transparent; overflow: hidden; }
     const stageH = stage.clientHeight || 220;
 
     const myName = B.os === 'mac' ? 'Mac' : 'PC';
-    const peerName = (cfg.peer && cfg.peer.name) ? cfg.peer.name : (B.os === 'mac' ? 'PC' : 'Mac');
+    const peerName = (curPeer && curPeer.name) ? curPeer.name : (B.os === 'mac' ? 'PC' : 'Mac');
 
     const cleanLocal = sanitizeDisplays(localDisplays, 2560, 1664);
     const cleanPeer = sanitizeDisplays(peerDisplays, 2560, 1440);
@@ -595,24 +596,34 @@ body.banner { background: transparent; overflow: hidden; }
   }
 
   handlers.settings = (m) => {
-    cfg = m.cfg || {};
-    $('#ver').textContent = 'Version ' + m.version;
-    $('#me-label').textContent = B.os === 'mac' ? 'This Mac' : 'This PC';
-    $$('#settings [data-key]').forEach((el) => {
-      const v = cfg[el.dataset.key];
-      if (el.classList.contains('toggle')) el.classList.toggle('on', !!v);
-      else if (el.type === 'range') { el.value = v; fmt(el, v); }
-      else if (el.tagName === 'SELECT') {
-        if (![...el.options].some((o) => o.value == v)) el.insertAdjacentHTML('beforeend', `<option value="${v}">Key ${v}</option>`);
-        el.value = String(v);
-      }
-    });
-    $$('[data-side]').forEach((x) => x.classList.toggle('on', x.dataset.side === cfg.peer_side));
-    $('[data-special=autostart]').classList.toggle('on', m.autostart);
-    $('#peer-name').textContent = m.peer ? m.peer.name : 'Not paired';
-    $('#peer-sub').textContent = m.peer ? (m.connected ? 'Connected' : 'Not connected right now') : 'Pair to start sharing your keyboard and mouse.';
-    $('#peer-dot').classList.toggle('on', !!m.connected);
-    $('#unpair').hidden = !m.peer; $('#pair-btn').textContent = m.peer ? 'Pair again…' : 'Pair…';
+    try {
+      cfg = m.cfg || {};
+      curPeer = m.peer || null;
+      if ($('#ver')) $('#ver').textContent = 'Version ' + (m.version || '');
+      $$('#settings [data-key]').forEach((el) => {
+        const v = cfg[el.dataset.key];
+        if (el.classList.contains('toggle')) el.classList.toggle('on', !!v);
+        else if (el.type === 'range') { el.value = (typeof v === 'number') ? v : el.value; fmt(el, el.value); }
+        else if (el.tagName === 'SELECT') {
+          if (v !== undefined) {
+            if (![...el.options].some((o) => o.value == v)) el.insertAdjacentHTML('beforeend', `<option value="${v}">Key ${v}</option>`);
+            el.value = String(v);
+          }
+        }
+      });
+      $$('[data-side]').forEach((x) => x.classList.toggle('on', x.dataset.side === cfg.peer_side));
+      const autoToggle = $('[data-special=autostart]');
+      if (autoToggle) autoToggle.classList.toggle('on', !!m.autostart);
+      const peerNameEl = $('#peer-name');
+      if (peerNameEl) peerNameEl.textContent = m.peer ? m.peer.name : 'Not paired';
+      const peerSubEl = $('#peer-sub');
+      if (peerSubEl) peerSubEl.textContent = m.peer ? (m.connected ? 'Connected' : 'Not connected right now') : 'Pair to start sharing your keyboard and mouse.';
+      const peerDotEl = $('#peer-dot');
+      if (peerDotEl) peerDotEl.classList.toggle('on', !!m.connected);
+      const unpairBtn = $('#unpair');
+      if (unpairBtn) unpairBtn.hidden = !m.peer;
+      const pairBtn = $('#pair-btn');
+      if (pairBtn) pairBtn.textContent = m.peer ? 'Pair again…' : 'Pair…';
 
     // Render local displays
     const myName = B.os === 'mac' ? 'Mac' : 'PC';
@@ -657,7 +668,10 @@ body.banner { background: transparent; overflow: hidden; }
       curOffset = cfg.peer_offset || 0;
       renderLayoutDesigner();
     }
-  };
+  } catch (err) {
+    console.error('handlers.settings failed:', err);
+  }
+};
 
   let liveTimer = null;
   function sendLiveLayout(side, offset) {
@@ -884,6 +898,13 @@ body.banner { background: transparent; overflow: hidden; }
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') send({ cmd: 'close' }); });
   document.addEventListener('contextmenu', (e) => { if (!e.target.closest('input')) e.preventDefault(); });
+  if (B.state && handlers[B.state.type]) {
+    try {
+      handlers[B.state.type](B.state);
+    } catch (e) {
+      console.error('Initial state hydration failed:', e);
+    }
+  }
   send({ cmd: 'ready' });
 })();
 </script>
