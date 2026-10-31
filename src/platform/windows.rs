@@ -272,6 +272,61 @@ impl Platform for Win {
         out
     }
 
+    fn display_infos(&self) -> Vec<crate::proto::DisplayInfo> {
+        struct WinMon {
+            x: f64,
+            y: f64,
+            w: f64,
+            h: f64,
+            is_primary: bool,
+            hmon: isize,
+        }
+        unsafe extern "system" fn cb(m: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+            let out = &mut *(data.0 as *mut Vec<WinMon>);
+            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if GetMonitorInfoW(m, &mut mi).as_bool() {
+                let r = mi.rcMonitor;
+                out.push(WinMon {
+                    x: r.left as f64,
+                    y: r.top as f64,
+                    w: (r.right - r.left) as f64,
+                    h: (r.bottom - r.top) as f64,
+                    is_primary: (mi.dwFlags & 1) != 0,
+                    hmon: m.0 as isize,
+                });
+            }
+            BOOL(1)
+        }
+        let mut mons: Vec<WinMon> = Vec::new();
+        unsafe {
+            let _ = EnumDisplayMonitors(None, None, Some(cb), LPARAM(&mut mons as *mut _ as isize));
+        }
+        mons.sort_by_key(|m| !m.is_primary);
+        mons.into_iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let w_mm = m.w * 0.264583;
+                let h_mm = m.h * 0.264583;
+                let inches = ((w_mm / 25.4).powi(2) + (h_mm / 25.4).powi(2)).sqrt();
+                crate::proto::DisplayInfo {
+                    id: m.hmon as u64,
+                    name: format!("Display {}", i + 1),
+                    x: m.x,
+                    y: m.y,
+                    width: m.w,
+                    height: m.h,
+                    width_mm: (w_mm * 10.0).round() / 10.0,
+                    height_mm: (h_mm * 10.0).round() / 10.0,
+                    inches: (inches * 10.0).round() / 10.0,
+                    scale_factor: 1.0,
+                    pixel_width: m.w as u32,
+                    pixel_height: m.h as u32,
+                    is_primary: m.is_primary,
+                }
+            })
+            .collect()
+    }
+
 
     fn cursor(&self) -> (f64, f64) {
         let mut p = POINT::default();

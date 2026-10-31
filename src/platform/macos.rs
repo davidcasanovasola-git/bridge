@@ -79,6 +79,15 @@ extern "C" {
     fn CGGetActiveDisplayList(max: u32, ds: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(d: u32) -> CGRect;
     fn CGMainDisplayID() -> u32;
+    fn CGDisplayScreenSize(d: u32) -> CGSize;
+    fn CGDisplayCopyDisplayMode(d: u32) -> Ref;
+    fn CGDisplayModeGetPixelWidth(m: Ref) -> usize;
+    fn CGDisplayModeGetPixelHeight(m: Ref) -> usize;
+    fn CGDisplayIsBuiltin(d: u32) -> i32;
+    fn CGDisplayRegisterReconfigurationCallback(
+        cb: extern "C" fn(u32, u32, *mut std::ffi::c_void),
+        user_info: *mut std::ffi::c_void,
+    ) -> i32;
     fn CGDisplayHideCursor(d: u32) -> i32;
     fn CGDisplayShowCursor(d: u32) -> i32;
     fn _CGSDefaultConnection() -> i32;
@@ -368,9 +377,22 @@ fn ask_for_accessibility() -> bool {
     }
 }
 
+extern "C" fn display_reconfig_cb(_d: u32, flags: u32, user_info: *mut std::ffi::c_void) {
+    if (flags & 1) == 0 && !user_info.is_null() {
+        let tx = unsafe { &*(user_info as *const Sender<Event>) };
+        let _ = tx.send(Event::DisplaysChanged);
+    }
+}
+
 pub fn start(events: Sender<Event>) -> Arc<dyn Platform> {
-    let shared = Arc::new(Shared { events, capturing: AtomicBool::new(false), tap: AtomicPtr::new(null_mut()) });
+    let shared = Arc::new(Shared { events: events.clone(), capturing: AtomicBool::new(false), tap: AtomicPtr::new(null_mut()) });
     let _ = SHARED.set(shared.clone());
+    unsafe {
+        CGDisplayRegisterReconfigurationCallback(
+            display_reconfig_cb,
+            Box::into_raw(Box::new(events)) as *mut _,
+        );
+    }
     let src = unsafe {
         let s = CGEventSourceCreate(1); // HID system state
         CGEventSourceSetLocalEventsSuppressionInterval(s, 0.0);
@@ -453,6 +475,64 @@ impl Platform for Mac {
             .map(|&d| {
                 let r = unsafe { CGDisplayBounds(d) };
                 Rect { x: r.origin.x, y: r.origin.y, w: r.size.w, h: r.size.h }
+            })
+            .collect()
+    }
+
+    fn display_infos(&self) -> Vec<crate::proto::DisplayInfo> {
+        let mut ids = [0u32; 16];
+        let mut n = 0u32;
+        unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut n) };
+        let main_id = unsafe { CGMainDisplayID() };
+        ids[..n as usize]
+            .iter()
+            .map(|&d| {
+                let r = unsafe { CGDisplayBounds(d) };
+                let size_mm = unsafe { CGDisplayScreenSize(d) };
+                let (w_mm, h_mm) = if size_mm.w > 0.0 && size_mm.h > 0.0 {
+                    (size_mm.w, size_mm.h)
+                } else {
+                    (r.size.w * 0.264583, r.size.h * 0.264583)
+                };
+                let w_in = w_mm / 25.4;
+                let h_in = h_mm / 25.4;
+                let inches = (w_in * w_in + h_in * h_in).sqrt();
+                let mode = unsafe { CGDisplayCopyDisplayMode(d) };
+                let (pixel_w, pixel_h) = if !mode.is_null() {
+                    let pw = unsafe { CGDisplayModeGetPixelWidth(mode) as u32 };
+                    let ph = unsafe { CGDisplayModeGetPixelHeight(mode) as u32 };
+                    unsafe { CFRelease(mode) };
+                    (pw, ph)
+                } else {
+                    (r.size.w as u32, r.size.h as u32)
+                };
+                let scale_factor = if r.size.w > 0.0 {
+                    (pixel_w as f64 / r.size.w * 100.0).round() / 100.0
+                } else {
+                    1.0
+                };
+                let is_builtin = unsafe { CGDisplayIsBuiltin(d) } != 0;
+                let is_primary = d == main_id;
+                let name = if is_builtin {
+                    "Built-in Display".to_string()
+                } else {
+                    format!("External Display {d}")
+                };
+                crate::proto::DisplayInfo {
+                    id: d as u64,
+                    name,
+                    x: r.origin.x,
+                    y: r.origin.y,
+                    width: r.size.w,
+                    height: r.size.h,
+                    width_mm: (w_mm * 10.0).round() / 10.0,
+                    height_mm: (h_mm * 10.0).round() / 10.0,
+                    inches: (inches * 10.0).round() / 10.0,
+                    scale_factor,
+                    pixel_width: pixel_w,
+                    pixel_height: pixel_h,
+                    is_primary,
+                }
             })
             .collect()
     }

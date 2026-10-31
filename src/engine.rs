@@ -25,6 +25,7 @@ pub enum Event {
     Connected,
     Disconnected,
     Ui(Ui),
+    DisplaysChanged,
 }
 
 pub enum Ui {
@@ -51,6 +52,8 @@ pub struct Status {
     pub connected: bool,
     pub mode: Mode,
     pub paused: bool,
+    pub local_displays: Vec<crate::proto::DisplayInfo>,
+    pub peer_displays: Vec<crate::proto::DisplayInfo>,
 }
 
 pub struct Engine {
@@ -63,6 +66,8 @@ pub struct Engine {
     peer_os: Option<Os>,
     displays: Vec<Rect>,
     displays_at: Instant,
+    local_displays: Vec<crate::proto::DisplayInfo>,
+    peer_displays: Vec<crate::proto::DisplayInfo>,
     push: f64,
     /// Where the pointer is while the other machine drives it.
     pos: (f64, f64),
@@ -95,6 +100,8 @@ impl Engine {
             peer_os,
             displays: vec![],
             displays_at: Instant::now() - Duration::from_secs(60),
+            local_displays: vec![],
+            peer_displays: vec![],
             push: 0.0,
             pos: (0.0, 0.0),
             reclaim: 0.0,
@@ -124,6 +131,8 @@ impl Engine {
                         macs: crate::wol::own_macs(),
                         version: env!("CARGO_PKG_VERSION").into(),
                     });
+                    self.local_displays = self.plat.display_infos();
+                    self.net.send(&Msg::Displays(self.local_displays.clone()));
                     if let Some(side) = self.pending_peer_side.take() {
                         self.net.send(&Msg::PeerSide(side));
                     }
@@ -139,6 +148,18 @@ impl Engine {
                     self.report();
                 }
                 Event::Ui(u) => self.on_ui(u),
+                Event::DisplaysChanged => {
+                    let updated = self.plat.display_infos();
+                    if !updated.is_empty() && updated != self.local_displays {
+                        log::info!("local display reconfigured: {updated:?}");
+                        self.local_displays = updated;
+                        self.displays = self.plat.displays();
+                        if self.connected {
+                            self.net.send(&Msg::Displays(self.local_displays.clone()));
+                        }
+                        self.report();
+                    }
+                }
             }
         }
     }
@@ -150,11 +171,22 @@ impl Engine {
             connected: self.connected,
             mode: self.mode,
             paused: c.paused,
+            local_displays: self.local_displays.clone(),
+            peer_displays: self.peer_displays.clone(),
         });
     }
 
     fn displays(&mut self) -> &[Rect] {
         if self.displays_at.elapsed() > Duration::from_secs(2) || self.displays.is_empty() {
+            let updated = self.plat.display_infos();
+            if !updated.is_empty() && updated != self.local_displays {
+                log::info!("local display topology changed: {updated:?}");
+                self.local_displays = updated;
+                if self.connected {
+                    self.net.send(&Msg::Displays(self.local_displays.clone()));
+                }
+                self.report();
+            }
             self.displays = self.plat.displays();
             self.displays_at = Instant::now();
         }
@@ -407,6 +439,11 @@ impl Engine {
                 self.report();
             }
             Msg::Ping => {}
+            Msg::Displays(ds) => {
+                log::info!("peer reported {} displays: {ds:?}", ds.len());
+                self.peer_displays = ds;
+                self.report();
+            }
             Msg::Clipboard(clip) => self.clipboard.apply(clip),
             Msg::PeerSide(side) => {
                 self.pending_peer_side = None;
@@ -570,6 +607,7 @@ mod e2e {
         tx: Sender<Event>,
         fake: Arc<Fake>,
         cfg: Arc<RwLock<Config>>,
+        status: Arc<Mutex<Option<Status>>>,
     }
 
     impl Side {
@@ -627,9 +665,13 @@ mod e2e {
             let (tx, rx) = channel();
             let net = Net::start(cfg.clone(), tx.clone()).unwrap();
             let fake = Arc::new(Fake::default());
-            let engine = Engine::new(cfg.clone(), net, fake.clone(), Box::new(|_| {}));
+            let status = Arc::new(Mutex::new(None));
+            let s = status.clone();
+            let engine = Engine::new(cfg.clone(), net, fake.clone(), Box::new(move |st| {
+                *s.lock().unwrap() = Some(st);
+            }));
             std::thread::spawn(move || engine.run(rx));
-            Side { tx, fake, cfg }
+            Side { tx, fake, cfg, status }
         };
         // A (think: the Mac) has the PC to its right; B has the Mac to its left.
         let a = start(mk(&ka, &kb, pa, pb, crate::proto::Side::Right));
@@ -790,6 +832,40 @@ mod e2e {
         let t = Instant::now();
         while a.cfg.read().unwrap().peer_side != crate::proto::Side::Left {
             assert!(t.elapsed() < Duration::from_secs(5), "A never updated peer_side to Left");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn display_info_exchange() {
+        let (a, b) = pair_up();
+        connected(&a, &b);
+
+        // Verify that B received A's display info
+        let t = Instant::now();
+        loop {
+            if let Some(st) = b.status.lock().unwrap().as_ref() {
+                if !st.peer_displays.is_empty() {
+                    assert_eq!(st.peer_displays[0].width, 1000.0);
+                    assert_eq!(st.peer_displays[0].height, 800.0);
+                    break;
+                }
+            }
+            assert!(t.elapsed() < Duration::from_secs(5), "B never received A's display info");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        // Verify that A received B's display info
+        let t = Instant::now();
+        loop {
+            if let Some(st) = a.status.lock().unwrap().as_ref() {
+                if !st.peer_displays.is_empty() {
+                    assert_eq!(st.peer_displays[0].width, 1000.0);
+                    assert_eq!(st.peer_displays[0].height, 800.0);
+                    break;
+                }
+            }
+            assert!(t.elapsed() < Duration::from_secs(5), "A never received B's display info");
             std::thread::sleep(Duration::from_millis(20));
         }
     }

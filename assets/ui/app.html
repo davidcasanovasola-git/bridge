@@ -197,6 +197,18 @@ body.banner { background: transparent; overflow: hidden; }
     <button class="side left" data-side="left">Left</button><button class="side right" data-side="right">Right</button>
     <div class="me" id="me-label">This Mac</div></div></div>
 
+  <h2>Displays &amp; Layout</h2>
+  <div class="list" id="displays-list" style="font-size:12.5px;padding:10px 14px;background:rgba(128,128,128,0.08);border-radius:10px;margin-bottom:14px;">
+    <div id="local-displays-box" style="margin-bottom:10px;">
+      <div style="font-weight:600;margin-bottom:4px;" id="local-disp-title">This Machine</div>
+      <div id="local-disp-items" style="color:var(--sub, #888);">Detecting monitors…</div>
+    </div>
+    <div id="peer-displays-box">
+      <div style="font-weight:600;margin-bottom:4px;" id="peer-disp-title">Other Machine</div>
+      <div id="peer-disp-items" style="color:var(--sub, #888);">Waiting for connection…</div>
+    </div>
+  </div>
+
   <h2>Feel</h2>
   <div class="list">
     <div class="item"><div class="t">Push to cross<small>How far you push into the edge before crossing.</small></div><input type="range" min="0" max="150" step="5" data-key="edge_resistance"><span class="val" data-fmt="px"></span></div>
@@ -388,6 +400,42 @@ body.banner { background: transparent; overflow: hidden; }
     $('#peer-sub').textContent = m.peer ? (m.connected ? 'Connected' : 'Not connected right now') : 'Pair to start sharing your keyboard and mouse.';
     $('#peer-dot').classList.toggle('on', !!m.connected);
     $('#unpair').hidden = !m.peer; $('#pair-btn').textContent = m.peer ? 'Pair again…' : 'Pair…';
+
+    // Render local displays
+    const myName = B.os === 'mac' ? 'This Mac' : 'This PC';
+    const locTitle = $('#local-disp-title');
+    if (locTitle) locTitle.textContent = myName;
+    const locItems = $('#local-disp-items');
+    if (locItems) {
+      if (m.local_displays && m.local_displays.length) {
+        locItems.innerHTML = m.local_displays.map((d) =>
+          `<div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span>🖥️ <b>${d.name || 'Display'}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width}×${d.pixel_height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
+            <span style="opacity:0.75;font-variant-numeric:tabular-nums;">Pos: (${Math.round(d.x)}, ${Math.round(d.y)})</span>
+          </div>`
+        ).join('');
+      } else {
+        locItems.textContent = '1 display detected';
+      }
+    }
+
+    // Render peer displays
+    const peerName = m.peer ? m.peer.name : 'Other machine';
+    const pTitle = $('#peer-disp-title');
+    if (pTitle) pTitle.textContent = peerName;
+    const pItems = $('#peer-disp-items');
+    if (pItems) {
+      if (m.peer_displays && m.peer_displays.length) {
+        pItems.innerHTML = m.peer_displays.map((d) =>
+          `<div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span>🖥️ <b>${d.name || 'Display'}</b> ${d.inches ? d.inches + '"' : ''} (${d.pixel_width}×${d.pixel_height}${d.scale_factor > 1 ? ' @' + d.scale_factor + 'x' : ''})</span>
+            <span style="opacity:0.75;font-variant-numeric:tabular-nums;">Pos: (${Math.round(d.x)}, ${Math.round(d.y)})</span>
+          </div>`
+        ).join('');
+      } else {
+        pItems.textContent = m.connected ? 'Waiting for display info…' : 'Connect to see monitors';
+      }
+    }
   };
 
   /* About */

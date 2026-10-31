@@ -359,6 +359,7 @@ impl App {
             o.remove("public_key");
             o.remove("peer");
         }
+        let empty_displays = Vec::new();
         json!({
             "type": "settings",
             "cfg": cfg,
@@ -366,6 +367,8 @@ impl App {
             "autostart": autostart::enabled(),
             "peer": c.peer.as_ref().map(|p| json!({"name": p.name, "os": p.os})),
             "connected": self.status.as_ref().is_some_and(|s| s.connected),
+            "local_displays": self.status.as_ref().map(|s| &s.local_displays).unwrap_or(&empty_displays),
+            "peer_displays": self.status.as_ref().map(|s| &s.peer_displays).unwrap_or(&empty_displays),
         })
     }
 
