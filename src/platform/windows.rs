@@ -271,7 +271,7 @@ pub fn start(events: Sender<Event>) -> Arc<dyn Platform> {
                 0,
                 None,
                 None,
-                windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default(),
+                Some(windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default().into()),
                 None,
             );
 
