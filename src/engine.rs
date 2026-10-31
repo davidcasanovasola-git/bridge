@@ -567,10 +567,6 @@ impl Engine {
                 }
             }
             Msg::Enter { frac } => {
-                if self.mode == Mode::Controlling {
-                    // Both pushed at once; the newcomer wins.
-                    self.plat.set_capturing(false);
-                }
                 let side = self.cfg.read().unwrap().peer_side;
                 let ds = self.displays().to_vec();
                 let p = match frac {
@@ -582,6 +578,7 @@ impl Engine {
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 self.mode = Mode::Controlled;
+                self.plat.warp(p.0, p.1);
                 self.plat.set_capturing(false);
                 self.plat.move_to(p.0, p.1);
                 self.report();
@@ -592,8 +589,6 @@ impl Engine {
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 if unified {
-                    self.plat.set_capturing(false);
-                    self.mode = Mode::Controlled;
                     if let Some(f) = frac {
                         let side = self.cfg.read().unwrap().peer_side;
                         let ds = self.displays().to_vec();
@@ -601,10 +596,11 @@ impl Engine {
                         self.pos = (x, y);
                         self.plat.warp(x, y);
                     }
+                    self.plat.set_capturing(false);
+                    self.mode = Mode::Controlled;
                     self.send_clipboard();
                     log::info!("unified: cursor returned to this machine");
                 } else {
-                    self.go_local();
                     if was == Mode::Controlling {
                         if let Some(f) = frac {
                             let side = self.cfg.read().unwrap().peer_side;
@@ -612,7 +608,9 @@ impl Engine {
                             let (x, y) = geometry::entry_point(&ds, side, f);
                             self.plat.warp(x, y);
                         }
-                    } else if was == Mode::Controlled {
+                    }
+                    self.go_local();
+                    if was == Mode::Controlled {
                         // The other side took its input back; hand it our clipboard.
                         self.send_clipboard();
                     }
