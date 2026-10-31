@@ -418,6 +418,10 @@ impl App {
         if key == "paused" {
             let _ = self.tx.send(Event::Ui(Ui::Refresh));
         }
+        if key == "peer_side" {
+            let side = self.cfg.read().unwrap().peer_side;
+            let _ = self.tx.send(Event::Ui(Ui::PeerSideChanged(side)));
+        }
     }
 
     fn ipc(&mut self, target: &EventLoopWindowTarget<UserEvent>, page: Page, body: &str) {

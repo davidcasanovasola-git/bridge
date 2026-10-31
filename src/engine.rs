@@ -35,6 +35,7 @@ pub enum Ui {
     Quit,
     /// Settings changed elsewhere; re-report status.
     Refresh,
+    PeerSideChanged(crate::proto::Side),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -73,6 +74,7 @@ pub struct Engine {
     hotkey_last_tap: Option<Instant>,
     clipboard: Clipboard,
     last_wake: Option<Instant>,
+    pending_peer_side: Option<crate::proto::Side>,
 }
 
 impl Engine {
@@ -102,6 +104,7 @@ impl Engine {
             hotkey_last_tap: None,
             clipboard: Clipboard::new(),
             last_wake: None,
+            pending_peer_side: None,
         }
     }
 
@@ -121,6 +124,9 @@ impl Engine {
                         macs: crate::wol::own_macs(),
                         version: env!("CARGO_PKG_VERSION").into(),
                     });
+                    if let Some(side) = self.pending_peer_side.take() {
+                        self.net.send(&Msg::PeerSide(side));
+                    }
                     if self.cfg.read().unwrap().forward_on_connect {
                         log::info!("forward_on_connect: immediately driving peer");
                         self.hand_over(None);
@@ -181,6 +187,13 @@ impl Engine {
                 self.peer_os = self.cfg.read().unwrap().peer.as_ref().map(|p| p.os);
                 self.net.reset();
                 self.report();
+            }
+            Ui::PeerSideChanged(side) => {
+                if self.connected {
+                    self.net.send(&Msg::PeerSide(side));
+                } else {
+                    self.pending_peer_side = Some(side);
+                }
             }
         }
     }
@@ -395,6 +408,18 @@ impl Engine {
             }
             Msg::Ping => {}
             Msg::Clipboard(clip) => self.clipboard.apply(clip),
+            Msg::PeerSide(side) => {
+                self.pending_peer_side = None;
+                let opposite = side.opposite();
+                log::info!("peer reported peer_side {side:?}, updating our side to {opposite:?}");
+                let mut c = self.cfg.write().unwrap();
+                if c.peer_side != opposite {
+                    c.peer_side = opposite;
+                    c.save();
+                    drop(c);
+                    self.report();
+                }
+            }
             Msg::Enter { frac } => {
                 if self.mode == Mode::Controlling {
                     // Both pushed at once; the newcomer wins.
@@ -544,6 +569,7 @@ mod e2e {
     struct Side {
         tx: Sender<Event>,
         fake: Arc<Fake>,
+        cfg: Arc<RwLock<Config>>,
     }
 
     impl Side {
@@ -601,9 +627,9 @@ mod e2e {
             let (tx, rx) = channel();
             let net = Net::start(cfg.clone(), tx.clone()).unwrap();
             let fake = Arc::new(Fake::default());
-            let engine = Engine::new(cfg, net, fake.clone(), Box::new(|_| {}));
+            let engine = Engine::new(cfg.clone(), net, fake.clone(), Box::new(|_| {}));
             std::thread::spawn(move || engine.run(rx));
-            Side { tx, fake }
+            Side { tx, fake, cfg }
         };
         // A (think: the Mac) has the PC to its right; B has the Mac to its left.
         let a = start(mk(&ka, &kb, pa, pb, crate::proto::Side::Right));
@@ -744,5 +770,27 @@ mod e2e {
         // User moves mouse on B: B's mouse is forwarded to A and moves A's cursor.
         b.input(Input::Move { x: 0.0, y: 0.0, dx: -10.0, dy: 20.0 });
         a.wait_for("move 987,420");
+    }
+
+    #[test]
+    fn peer_side_layout_sync() {
+        let (a, b) = pair_up();
+        connected(&a, &b);
+
+        // A changes side to Top -> B should automatically switch to Bottom
+        a.tx.send(Event::Ui(Ui::PeerSideChanged(crate::proto::Side::Top))).unwrap();
+        let t = Instant::now();
+        while b.cfg.read().unwrap().peer_side != crate::proto::Side::Bottom {
+            assert!(t.elapsed() < Duration::from_secs(5), "B never updated peer_side to Bottom");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        // B changes side to Right -> A should automatically switch to Left
+        b.tx.send(Event::Ui(Ui::PeerSideChanged(crate::proto::Side::Right))).unwrap();
+        let t = Instant::now();
+        while a.cfg.read().unwrap().peer_side != crate::proto::Side::Left {
+            assert!(t.elapsed() < Duration::from_secs(5), "A never updated peer_side to Left");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 }
