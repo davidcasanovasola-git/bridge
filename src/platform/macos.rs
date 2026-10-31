@@ -387,6 +387,7 @@ extern "C" fn display_reconfig_cb(_d: u32, flags: u32, user_info: *mut std::ffi:
 pub fn start(events: Sender<Event>) -> Arc<dyn Platform> {
     let shared = Arc::new(Shared { events: events.clone(), capturing: AtomicBool::new(false), tap: AtomicPtr::new(null_mut()) });
     let _ = SHARED.set(shared.clone());
+    let events_tap = events.clone();
     unsafe {
         CGDisplayRegisterReconfigurationCallback(
             display_reconfig_cb,
@@ -405,7 +406,7 @@ pub fn start(events: Sender<Event>) -> Arc<dyn Platform> {
     };
     std::thread::Builder::new()
         .name("event-tap".into())
-        .spawn(run_tap)
+        .spawn(move || run_tap(events_tap))
         .unwrap();
     let pos = unsafe {
         let e = CGEventCreate(null_mut());
@@ -427,7 +428,67 @@ pub fn start(events: Sender<Event>) -> Arc<dyn Platform> {
     })
 }
 
-fn run_tap() {
+#[allow(non_camel_case_types)]
+type io_connect_t = u32;
+#[allow(non_camel_case_types)]
+type io_service_t = u32;
+#[allow(non_camel_case_types)]
+type io_object_t = u32;
+#[allow(non_camel_case_types)]
+type IONotificationPortRef = *mut std::ffi::c_void;
+
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IORegisterForSystemPower(
+        refcon: *mut std::ffi::c_void,
+        thePortRef: *mut IONotificationPortRef,
+        callback: unsafe extern "C" fn(*mut std::ffi::c_void, io_service_t, u32, *mut std::ffi::c_void),
+        notifier: *mut io_object_t,
+    ) -> io_connect_t;
+
+    fn IOAllowPowerChange(kernelPort: io_connect_t, notificationID: isize) -> i32;
+    fn IONotificationPortGetRunLoopSource(notify: IONotificationPortRef) -> *mut std::ffi::c_void;
+}
+
+const kIOMessageCanSystemSleep: u32 = 0xe000_0270;
+const kIOMessageSystemWillSleep: u32 = 0xe000_0280;
+const kIOMessageSystemHasPoweredOn: u32 = 0xe000_0300;
+const kIOMessageSystemWillRestart: u32 = 0xe000_0310;
+const kIOMessageSystemWillPowerOff: u32 = 0xe000_0250;
+
+static ROOT_PORT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+unsafe extern "C" fn sleep_callback(
+    refcon: *mut std::ffi::c_void,
+    _service: io_service_t,
+    message_type: u32,
+    message_argument: *mut std::ffi::c_void,
+) {
+    let tx = &*(refcon as *const Sender<Event>);
+    let root_port = ROOT_PORT.load(Ordering::SeqCst);
+    match message_type {
+        kIOMessageCanSystemSleep => {
+            let _ = IOAllowPowerChange(root_port, message_argument as isize);
+        }
+        kIOMessageSystemWillSleep => {
+            log::info!("macOS: system will sleep notification received");
+            let _ = tx.send(Event::SystemSleep);
+            let _ = IOAllowPowerChange(root_port, message_argument as isize);
+        }
+        kIOMessageSystemWillPowerOff | kIOMessageSystemWillRestart => {
+            log::info!("macOS: system will power off / restart notification received");
+            let _ = tx.send(Event::SystemShutdown);
+            let _ = IOAllowPowerChange(root_port, message_argument as isize);
+        }
+        kIOMessageSystemHasPoweredOn => {
+            log::info!("macOS: system has powered on notification received");
+            let _ = tx.send(Event::SystemWake);
+        }
+        _ => {}
+    }
+}
+
+fn run_tap(tx: Sender<Event>) {
     let mask: u64 = [LDOWN, LUP, RDOWN, RUP, MOVED, LDRAG, RDRAG, KEYDOWN, KEYUP, FLAGS, SYSDEFINED, SCROLL, ODOWN, OUP, ODRAG]
         .iter()
         .fold(0, |m, t| m | (1u64 << t));
@@ -450,6 +511,20 @@ fn run_tap() {
         let src = CFMachPortCreateRunLoopSource(null_mut(), tap, 0);
         CFRunLoopAddSource(CFRunLoopGetCurrent(), src, kCFRunLoopCommonModes);
         CGEventTapEnable(tap, true);
+
+        let mut notify_port: IONotificationPortRef = null_mut();
+        let mut notifier: io_object_t = 0;
+        let tx_ptr = Box::into_raw(Box::new(tx)) as *mut std::ffi::c_void;
+        let root = IORegisterForSystemPower(tx_ptr, &mut notify_port, sleep_callback, &mut notifier);
+        if root != 0 && !notify_port.is_null() {
+            ROOT_PORT.store(root, Ordering::SeqCst);
+            let psrc = IONotificationPortGetRunLoopSource(notify_port);
+            if !psrc.is_null() {
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), psrc as Ref, kCFRunLoopCommonModes);
+                log::info!("macOS: registered for system sleep/wake/power notifications");
+            }
+        }
+
         CFRunLoopRun();
     }
 }

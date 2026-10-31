@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use windows::core::BOOL;
-use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -28,6 +28,43 @@ fn send(i: Input) {
     if let Some(sh) = SHARED.get() {
         let _ = sh.events.send(Event::Input(i));
     }
+}
+
+fn send_event(e: Event) {
+    if let Some(sh) = SHARED.get() {
+        let _ = sh.events.send(e);
+    }
+}
+
+const PBT_APMSUSPEND_U32: u32 = 4;
+const PBT_APMRESUMESUSPEND_U32: u32 = 7;
+const PBT_APMRESUMEAUTOMATIC_U32: u32 = 18;
+
+unsafe extern "system" fn power_wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_POWERBROADCAST => {
+            let wp_u32 = wp.0 as u32;
+            if wp_u32 == PBT_APMSUSPEND_U32 {
+                log::info!("Windows: system suspending (sleep)");
+                send_event(Event::SystemSleep);
+            } else if wp_u32 == PBT_APMRESUMEAUTOMATIC_U32 || wp_u32 == PBT_APMRESUMESUSPEND_U32 {
+                log::info!("Windows: system resumed from sleep");
+                send_event(Event::SystemWake);
+            }
+        }
+        WM_QUERYENDSESSION => {
+            log::info!("Windows: query end session (shutdown/logoff requested)");
+            return LRESULT(1);
+        }
+        WM_ENDSESSION => {
+            if wp.0 != 0 {
+                log::info!("Windows: end session (shutdown/logoff confirmed)");
+                send_event(Event::SystemShutdown);
+            }
+        }
+        _ => {}
+    }
+    DefWindowProcW(hwnd, msg, wp, lp)
 }
 
 const WHEEL_TO_PX: f64 = 40.0 / 120.0;
@@ -213,6 +250,31 @@ pub fn start(events: Sender<Event>) -> Arc<dyn Platform> {
             } else {
                 log::info!("input hooks running");
             }
+
+            let class_name = windows::core::w!("BridgePowerMsgWin");
+            let wc = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(power_wnd_proc),
+                hInstance: windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default().into(),
+                lpszClassName: class_name,
+                ..Default::default()
+            };
+            let _ = RegisterClassExW(&wc);
+            let _hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class_name,
+                class_name,
+                WS_OVERLAPPED,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default(),
+                None,
+            );
+
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 let _ = TranslateMessage(&msg);

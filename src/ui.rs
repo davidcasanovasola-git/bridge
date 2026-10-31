@@ -229,6 +229,7 @@ impl App {
                 p.window.set_visible(true);
                 p.window.set_focus();
                 crate::platform::activate_app();
+                self.refresh(page);
             }
             return;
         }
@@ -321,6 +322,7 @@ impl App {
         }
         self.by_window.insert(window.id(), page);
         self.panels.insert(page, Panel { window, webview });
+        self.refresh(page);
     }
 
     fn close(&mut self, page: Page) {
@@ -433,6 +435,19 @@ impl App {
     fn ipc(&mut self, target: &EventLoopWindowTarget<UserEvent>, page: Page, body: &str) {
         let Ok(m) = serde_json::from_str::<Value>(body) else { return };
         match m["cmd"].as_str().unwrap_or("") {
+            "setLiveLayout" => {
+                if let (Some(side_str), Some(offset)) = (m["side"].as_str(), m["offset"].as_f64()) {
+                    let side_val = serde_json::Value::String(side_str.to_string());
+                    if let Ok(side) = serde_json::from_value::<crate::proto::Side>(side_val) {
+                        {
+                            let mut c = self.cfg.write().unwrap();
+                            c.peer_side = side;
+                            c.peer_offset = offset;
+                        }
+                        let _ = self.tx.send(Event::Ui(Ui::PeerLayoutChanged { side, offset }));
+                    }
+                }
+            }
             "setLayout" => {
                 if let (Some(side_str), Some(offset)) = (m["side"].as_str(), m["offset"].as_f64()) {
                     let side_val = serde_json::Value::String(side_str.to_string());
@@ -818,7 +833,18 @@ pub fn run() {
                     app.lost_at = None;
                     app.lost_shown = false;
                 } else if was_connected == Some(true) && !s.connected && s.peer.is_some() {
-                    app.lost_at = Some(Instant::now() + Duration::from_secs(6));
+                    if let Some(reason) = s.clean_disconnect {
+                        let msg = match reason {
+                            crate::proto::ByeReason::Quit => format!("{peer} closed Bridge."),
+                            crate::proto::ByeReason::Sleep => format!("{peer} went to sleep."),
+                            crate::proto::ByeReason::Shutdown => format!("{peer} shut down."),
+                        };
+                        notify(&msg);
+                        app.lost_at = None;
+                        app.lost_shown = true;
+                    } else {
+                        app.lost_at = Some(Instant::now() + Duration::from_secs(6));
+                    }
                 }
                 let state = match (s.connected, s.mode) {
                     (false, _) => TrayState::Off,

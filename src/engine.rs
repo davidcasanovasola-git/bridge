@@ -26,6 +26,9 @@ pub enum Event {
     Disconnected,
     Ui(Ui),
     DisplaysChanged,
+    SystemSleep,
+    SystemWake,
+    SystemShutdown,
 }
 
 pub enum Ui {
@@ -56,6 +59,7 @@ pub struct Status {
     pub paused: bool,
     pub local_displays: Vec<crate::proto::DisplayInfo>,
     pub peer_displays: Vec<crate::proto::DisplayInfo>,
+    pub clean_disconnect: Option<crate::proto::ByeReason>,
 }
 
 pub struct Engine {
@@ -82,6 +86,7 @@ pub struct Engine {
     clipboard: Clipboard,
     last_wake: Option<Instant>,
     pending_peer_side: Option<crate::proto::Side>,
+    clean_disconnect: Option<crate::proto::ByeReason>,
 }
 
 impl Engine {
@@ -114,10 +119,14 @@ impl Engine {
             clipboard: Clipboard::new(),
             last_wake: None,
             pending_peer_side: None,
+            clean_disconnect: None,
         }
     }
 
     pub fn run(mut self, rx: Receiver<Event>) {
+        self.local_displays = self.plat.display_infos();
+        self.displays = self.plat.displays();
+        self.displays_at = Instant::now();
         self.report();
         while let Ok(ev) = rx.recv() {
             match ev {
@@ -126,6 +135,7 @@ impl Engine {
                 Event::Connected => {
                     self.go_local();
                     self.connected = true;
+                    self.clean_disconnect = None;
                     let name = crate::machine_name();
                     self.net.send(&Msg::Hello {
                         name,
@@ -162,6 +172,22 @@ impl Engine {
                         self.report();
                     }
                 }
+                Event::SystemSleep => {
+                    log::info!("system entering sleep");
+                    self.goodbye(crate::proto::ByeReason::Sleep);
+                }
+                Event::SystemShutdown => {
+                    log::info!("system shutting down");
+                    self.goodbye(crate::proto::ByeReason::Shutdown);
+                }
+                Event::SystemWake => {
+                    log::info!("system woke up");
+                    self.local_displays = self.plat.display_infos();
+                    self.displays = self.plat.displays();
+                    self.displays_at = Instant::now();
+                    self.net.reset();
+                    self.report();
+                }
             }
         }
     }
@@ -175,6 +201,7 @@ impl Engine {
             paused: c.paused,
             local_displays: self.local_displays.clone(),
             peer_displays: self.peer_displays.clone(),
+            clean_disconnect: self.clean_disconnect,
         });
     }
 
@@ -211,10 +238,7 @@ impl Engine {
             }
             Ui::Refresh => self.report(),
             Ui::Quit => {
-                if self.mode == Mode::Controlling {
-                    self.net.send(&Msg::Leave { frac: None });
-                }
-                self.go_local();
+                self.goodbye(crate::proto::ByeReason::Quit);
                 RELEASED.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             Ui::Repaired => {
@@ -430,6 +454,22 @@ impl Engine {
         }
     }
 
+    fn goodbye(&mut self, reason: crate::proto::ByeReason) {
+        log::info!("sending goodbye to peer: {reason:?}");
+        if self.connected {
+            self.net.send(&Msg::Bye(reason));
+            std::thread::sleep(Duration::from_millis(80));
+        }
+        if self.mode == Mode::Controlling {
+            self.plat.set_capturing(false);
+        }
+        self.go_local();
+        self.connected = false;
+        self.clean_disconnect = Some(reason);
+        self.net.reset();
+        self.report();
+    }
+
     fn on_msg(&mut self, m: Msg) {
         match m {
             Msg::Hello { name, os, macs, version } => {
@@ -445,6 +485,9 @@ impl Engine {
                 }
                 c.save();
                 drop(c);
+                if !self.local_displays.is_empty() {
+                    self.net.send(&Msg::Displays(self.local_displays.clone()));
+                }
                 self.report();
             }
             Msg::Ping => {}
@@ -587,6 +630,23 @@ impl Engine {
                 self.plat.key(hid, down);
             }
             Msg::Media(m) => self.plat.media(m),
+            Msg::Bye(reason) => {
+                let peer_name = self.cfg.read().unwrap().peer.as_ref().map(|p| p.name.clone()).unwrap_or_else(|| "The other machine".into());
+                let msg = match reason {
+                    crate::proto::ByeReason::Quit => format!("{peer_name} closed Bridge"),
+                    crate::proto::ByeReason::Sleep => format!("{peer_name} went to sleep"),
+                    crate::proto::ByeReason::Shutdown => format!("{peer_name} shut down"),
+                };
+                log::info!("peer cleanly disconnected: {msg}");
+                if self.mode == Mode::Controlling {
+                    self.plat.set_capturing(false);
+                }
+                self.go_local();
+                self.connected = false;
+                self.clean_disconnect = Some(reason);
+                self.net.reset();
+                self.report();
+            }
         }
     }
 }
@@ -782,6 +842,29 @@ mod e2e {
         a.wait_for("capture false");
         b.wait_for("key 0xe1 false");
         assert!(RELEASED.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn clean_goodbye_on_sleep_or_quit() {
+        let (a, b) = pair_up();
+        connected(&a, &b);
+        a.wait_for("capture true");
+        a.input(Input::Key { hid: 0x05, down: true });
+        b.wait_for("key 0x5 true");
+
+        // Machine A goes to sleep
+        a.tx.send(Event::SystemSleep).unwrap();
+        // A releases capture immediately
+        a.wait_for("capture false");
+        // B releases held keys immediately upon clean goodbye
+        b.wait_for("key 0x5 false");
+
+        // B should cleanly mark connected as false
+        let t = Instant::now();
+        while b.status.lock().unwrap().as_ref().is_some_and(|s| s.connected) && t.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!b.status.lock().unwrap().as_ref().is_some_and(|s| s.connected), "B should be cleanly disconnected");
     }
 
     #[test]

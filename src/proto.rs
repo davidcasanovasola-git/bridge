@@ -93,6 +93,15 @@ pub enum Msg {
     PeerLayout { side: Side, offset: f64 },
     /// Local machine's active displays topology, resolutions, scale and physical inches.
     Displays(Vec<DisplayInfo>),
+    /// Clean disconnect before quitting, sleeping, or shutting down.
+    Bye(ByeReason),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ByeReason {
+    Quit,
+    Sleep,
+    Shutdown,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
