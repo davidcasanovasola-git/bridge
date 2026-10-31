@@ -121,6 +121,10 @@ impl Engine {
                         macs: crate::wol::own_macs(),
                         version: env!("CARGO_PKG_VERSION").into(),
                     });
+                    if self.cfg.read().unwrap().forward_on_connect {
+                        log::info!("forward_on_connect: immediately driving peer");
+                        self.hand_over(None);
+                    }
                     self.report();
                 }
                 Event::Disconnected => {
@@ -200,7 +204,13 @@ impl Engine {
             Mode::Local => self.hand_over(None),
             Mode::Controlling => {
                 self.net.send(&Msg::Leave { frac: None });
-                self.go_local();
+                let unified = self.cfg.read().unwrap().unified_desktop;
+                if unified {
+                    self.plat.set_capturing(false);
+                    self.mode = Mode::Controlled;
+                } else {
+                    self.go_local();
+                }
                 self.report();
             }
             Mode::Controlled => self.give_back(None),
@@ -258,11 +268,19 @@ impl Engine {
                 self.net.send(&m);
             }
             Mode::Controlled => {
-                // Someone grabbed this machine's own mouse: give it back to them.
-                if let Input::Move { dx, dy, .. } = i {
-                    self.reclaim += dx.abs() + dy.abs();
-                    if self.reclaim > 60.0 {
-                        self.give_back(None);
+                let unified = self.cfg.read().unwrap().unified_desktop;
+                if unified {
+                    if let Input::Move { x, y, dx, dy } = i {
+                        self.pos = (x, y);
+                        self.watch_edge(x, y, dx, dy);
+                    }
+                } else {
+                    // Someone grabbed this machine's own mouse: give it back to them.
+                    if let Input::Move { dx, dy, .. } = i {
+                        self.reclaim += dx.abs() + dy.abs();
+                        if self.reclaim > 60.0 {
+                            self.give_back(None);
+                        }
                     }
                 }
             }
@@ -328,8 +346,15 @@ impl Engine {
     fn give_back(&mut self, frac: Option<f64>) {
         self.release_all();
         self.send_clipboard();
+        let unified = self.cfg.read().unwrap().unified_desktop;
         self.net.send(&Msg::Leave { frac });
-        self.mode = Mode::Local;
+        if unified {
+            self.mode = Mode::Controlling;
+            self.plat.set_capturing(true);
+            log::info!("unified: handed cursor to peer, now capturing input for peer");
+        } else {
+            self.mode = Mode::Local;
+        }
         self.report();
     }
 
@@ -384,22 +409,38 @@ impl Engine {
                 self.pos = p;
                 self.reclaim = 0.0;
                 self.mode = Mode::Controlled;
+                self.plat.set_capturing(false);
                 self.plat.move_to(p.0, p.1);
                 self.report();
             }
             Msg::Leave { frac } => {
                 let was = self.mode;
-                self.go_local();
-                if was == Mode::Controlling {
+                let unified = self.cfg.read().unwrap().unified_desktop;
+                if unified {
+                    self.plat.set_capturing(false);
+                    self.mode = Mode::Controlled;
                     if let Some(f) = frac {
                         let side = self.cfg.read().unwrap().peer_side;
                         let ds = self.displays().to_vec();
                         let (x, y) = geometry::entry_point(&ds, side, f);
+                        self.pos = (x, y);
                         self.plat.warp(x, y);
                     }
-                } else if was == Mode::Controlled {
-                    // The other side took its input back; hand it our clipboard.
                     self.send_clipboard();
+                    log::info!("unified: cursor returned to this machine");
+                } else {
+                    self.go_local();
+                    if was == Mode::Controlling {
+                        if let Some(f) = frac {
+                            let side = self.cfg.read().unwrap().peer_side;
+                            let ds = self.displays().to_vec();
+                            let (x, y) = geometry::entry_point(&ds, side, f);
+                            self.plat.warp(x, y);
+                        }
+                    } else if was == Mode::Controlled {
+                        // The other side took its input back; hand it our clipboard.
+                        self.send_clipboard();
+                    }
                 }
                 self.report();
             }
@@ -525,6 +566,14 @@ mod e2e {
     }
 
     fn pair_up() -> (Side, Side) {
+        pair_up_with_mode(false)
+    }
+
+    fn pair_up_unified() -> (Side, Side) {
+        pair_up_with_mode(true)
+    }
+
+    fn pair_up_with_mode(unified: bool) -> (Side, Side) {
         let gen = || snow::Builder::new(crate::net::NOISE.parse().unwrap()).generate_keypair().unwrap();
         let (ka, kb) = (gen(), gen());
         let (pa, pb) = (free_port(), free_port());
@@ -544,6 +593,7 @@ mod e2e {
             discovery: false,
             share_clipboard: false,
             ephemeral: true,
+            unified_desktop: unified,
             ..Default::default()
         };
         let start = |cfg: Config| {
@@ -660,5 +710,39 @@ mod e2e {
             assert!(t.elapsed() < Duration::from_secs(5), "A never released: {:?}", a.fake.log.lock().unwrap());
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn unified_round_trip_and_keyboard_forwarding() {
+        let (a, b) = pair_up_unified();
+
+        // Push into A's right edge: B's pointer appears at left edge.
+        connected(&a, &b);
+        a.wait_for("capture true");
+        b.wait_for("move 2,400");
+
+        // While cursor is on B, A's keyboard drives B.
+        a.input(Input::Key { hid: 0x04, down: true });
+        a.input(Input::Key { hid: 0x04, down: false });
+        b.wait_for("key 0x4 true");
+        b.wait_for("key 0x4 false");
+
+        // Now move cursor off B's left edge (towards A): hands cursor back to A.
+        b.input(Input::Move { x: 0.0, y: 400.0, dx: -500.0, dy: 0.0 });
+        a.wait_for("capture false");
+        a.wait_for("move 997,400");
+        b.wait_for("capture true");
+
+        // Now the cursor is back on A.
+        // User types on B (e.g. Mac keyboard while cursor is on Windows):
+        // B's keyboard is captured and forwarded to A!
+        b.input(Input::Key { hid: 0x05, down: true });
+        b.input(Input::Key { hid: 0x05, down: false });
+        a.wait_for("key 0x5 true");
+        a.wait_for("key 0x5 false");
+
+        // User moves mouse on B: B's mouse is forwarded to A and moves A's cursor.
+        b.input(Input::Move { x: 0.0, y: 0.0, dx: -10.0, dy: 20.0 });
+        a.wait_for("move 987,420");
     }
 }
