@@ -82,7 +82,6 @@ pub fn displays_bounds(ds: &[crate::proto::DisplayInfo]) -> Rect {
 
 /// Convert a local edge point (x, y) into a 0..1 fraction along the peer's shared edge,
 /// accounting for the relative layout offset and peer monitor bounds.
-/// Returns None if the cursor is pushed into a region where no peer display exists.
 pub fn peer_frac_along(
     local_ds: &[Rect],
     peer_ds: &[crate::proto::DisplayInfo],
@@ -90,9 +89,9 @@ pub fn peer_frac_along(
     y: f64,
     side: Side,
     peer_offset: f64,
-) -> Option<f64> {
+) -> f64 {
     if peer_ds.is_empty() {
-        return Some(frac_along(local_ds, x, y, side));
+        return frac_along(local_ds, x, y, side);
     }
     let lb = bounds(local_ds);
     let pb = displays_bounds(peer_ds);
@@ -107,13 +106,7 @@ pub fn peer_frac_along(
     // In the visual designer: peerCluster is placed at `peer_offset` relative to localCluster.
     // So a point on localCluster at `local_pos` maps to `local_pos - peer_offset` on peerCluster.
     let pos_in_peer = local_pos - peer_offset;
-
-    // Check if the cursor is within the peer's edge span (with 10px margin for edge tolerance)
-    if pos_in_peer < -10.0 || pos_in_peer > peer_span + 10.0 {
-        return None;
-    }
-
-    Some((pos_in_peer / peer_span).clamp(0.0, 1.0))
+    (pos_in_peer / peer_span.max(1.0)).clamp(0.0, 1.0)
 }
 
 /// Where a pointer arriving through the edge facing `side`, at `frac` along it, should land.
@@ -157,6 +150,7 @@ pub fn center(ds: &[Rect]) -> (f64, f64) {
     (r.x + r.w / 2.0, r.y + r.h / 2.0)
 }
 
+#[allow(dead_code)]
 pub enum Step {
     Move(f64, f64),
     /// Pushed off the edge facing the other machine, at this fraction along it.
@@ -252,12 +246,12 @@ mod tests {
 
         // 1. Moving up on Mac at right edge (x = 1470.0) with offset 0.0:
         // Must land inside Display 2 on Windows (-450.0), NOT at the far right of Display 1 (+2560.0)
-        let f_right = peer_frac_along(&mac_ds, &win_peer_ds, 1470.0, 0.0, Side::Top, 0.0).expect("should cross");
+        let f_right = peer_frac_along(&mac_ds, &win_peer_ds, 1470.0, 0.0, Side::Top, 0.0);
         let win_rects: Vec<Rect> = win_peer_ds.iter().map(|d| Rect { x: d.x, y: d.y, w: d.width, h: d.height }).collect();
         let (win_x, _) = entry_point(&win_rects, Side::Bottom, f_right);
         assert!((win_x - (-450.0)).abs() < 1.0, "Expected -450.0 but got {win_x}");
 
-        // 2. On Windows moving down at x = 2000.0 (Display 1, where Mac is not present underneath):
+        // 2. On Windows moving down at x = -1000.0 (inside Display 2):
         let mac_peer_ds = vec![crate::proto::DisplayInfo {
             id: 1,
             name: "Mac".into(),
@@ -273,7 +267,7 @@ mod tests {
             pixel_height: 1912,
             is_primary: true,
         }];
-        let f_blocked = peer_frac_along(&win_rects, &mac_peer_ds, 2000.0, 1439.0, Side::Bottom, 0.0);
-        assert!(f_blocked.is_none(), "Should be blocked because Mac is not under Display 1");
+        let f_win = peer_frac_along(&win_rects, &mac_peer_ds, -1000.0, 1244.0, Side::Bottom, 0.0);
+        assert!(f_win > 0.0 && f_win < 1.0, "Should cross into Mac");
     }
 }

@@ -87,6 +87,8 @@ pub struct Engine {
     last_wake: Option<Instant>,
     pending_peer_side: Option<crate::proto::Side>,
     clean_disconnect: Option<crate::proto::ByeReason>,
+    exit_push: f64,
+    last_cross: Instant,
 }
 
 impl Engine {
@@ -121,6 +123,8 @@ impl Engine {
             last_wake: None,
             pending_peer_side: None,
             clean_disconnect: None,
+            exit_push: 0.0,
+            last_cross: Instant::now() - Duration::from_secs(10),
         }
     }
 
@@ -357,7 +361,8 @@ impl Engine {
                     // Someone grabbed this machine's own mouse: give it back to them.
                     if let Input::Move { dx, dy, .. } = i {
                         self.reclaim += dx.abs() + dy.abs();
-                        if self.reclaim > 60.0 {
+                        if self.reclaim > 40.0 {
+                            self.reclaim = 0.0;
                             self.give_back(None);
                         }
                     }
@@ -366,7 +371,18 @@ impl Engine {
         }
     }
 
+    fn in_cooldown(&self) -> bool {
+        if self.cfg.read().unwrap().ephemeral {
+            false
+        } else {
+            self.last_cross.elapsed() < Duration::from_millis(200)
+        }
+    }
+
     fn watch_edge(&mut self, x: f64, y: f64, dx: f64, dy: f64) {
+        if self.in_cooldown() {
+            return;
+        }
         let (side, resistance, paused, peer_offset) = {
             let c = self.cfg.read().unwrap();
             (c.peer_side, c.edge_resistance, c.paused, c.peer_offset)
@@ -375,31 +391,31 @@ impl Engine {
             return;
         }
         let ds = self.displays().to_vec();
+        if !geometry::on_edge(&ds, x, y, side) {
+            self.push = 0.0;
+            return;
+        }
         let out = geometry::outward(side, dx, dy);
-        if !geometry::on_edge(&ds, x, y, side) || out < 0.0 {
+        // Only clear push if moving decisively away from the edge (ignore tiny hand tremor)
+        if out < -4.0 {
             self.push = 0.0;
             return;
         }
 
         // When the cursor is at the physical edge, the OS clamps movement in the outward direction to 0.0.
-        // Parallel motion along the edge often has minor human hand jitter (e.g. mouse moving downward has slight dx noise).
+        // Parallel motion along the edge often has minor human hand tremor.
         let stalled = match side {
-            Side::Left | Side::Right => dx == 0.0 && dy.abs() < 8.0,
-            Side::Top | Side::Bottom => dy == 0.0 && dx.abs() < 8.0,
+            Side::Left | Side::Right => dx == 0.0 && dy.abs() < 40.0,
+            Side::Top | Side::Bottom => dy == 0.0 && dx.abs() < 40.0,
         };
-        if out == 0.0 && !stalled {
+        if out <= 0.0 && !stalled {
             return;
         }
 
-        // Check if a peer display exists at this position along the shared edge
         let frac = geometry::peer_frac_along(&ds, &self.peer_displays, x, y, side, peer_offset);
-        let Some(frac) = frac else {
-            // No peer display overlaps with this edge coordinate. Keep cursor on local screen.
-            self.push = 0.0;
-            return;
-        };
 
-        self.push += out.max(1.0);
+        let push_inc = if out > 0.0 { out } else { 5.0 };
+        self.push += push_inc;
         if self.push < resistance {
             return;
         }
@@ -427,6 +443,7 @@ impl Engine {
             self.wake();
             return;
         }
+        self.last_cross = Instant::now();
         self.send_clipboard();
         self.net.send(&Msg::Enter { frac });
         self.mode = Mode::Controlling;
@@ -437,6 +454,7 @@ impl Engine {
 
     /// We were being driven; stop, and tell the other side.
     fn give_back(&mut self, frac: Option<f64>) {
+        self.last_cross = Instant::now();
         self.release_all();
         self.send_clipboard();
         let unified = self.cfg.read().unwrap().unified_desktop;
@@ -561,6 +579,8 @@ impl Engine {
                 };
                 self.pos = p;
                 self.reclaim = 0.0;
+                self.exit_push = 0.0;
+                self.last_cross = Instant::now();
                 self.mode = Mode::Controlled;
                 self.plat.set_capturing(false);
                 self.plat.move_to(p.0, p.1);
@@ -569,6 +589,8 @@ impl Engine {
             Msg::Leave { frac } => {
                 let was = self.mode;
                 let unified = self.cfg.read().unwrap().unified_desktop;
+                self.exit_push = 0.0;
+                self.last_cross = Instant::now();
                 if unified {
                     self.plat.set_capturing(false);
                     self.mode = Mode::Controlled;
@@ -607,11 +629,21 @@ impl Engine {
                 match geometry::step(&ds, self.pos.0, self.pos.1, dx * scale, dy * scale, side) {
                     Step::Move(x, y) => {
                         self.pos = (x, y);
+                        self.exit_push = 0.0;
                         self.reclaim = 0.0;
                         self.plat.move_to(x, y);
                     }
-                    Step::Exit(f) => {
-                        if self.buttons_down.is_empty() {
+                    Step::Exit(_) => {
+                        let out = geometry::outward(side, dx * scale, dy * scale);
+                        if out > 0.0 {
+                            self.exit_push += out;
+                        }
+                        let resistance = self.cfg.read().unwrap().edge_resistance;
+                        if self.buttons_down.is_empty()
+                            && self.exit_push >= resistance
+                            && !self.in_cooldown()
+                        {
+                            self.exit_push = 0.0;
                             let frac = geometry::peer_frac_along(
                                 &ds,
                                 &self.peer_displays,
@@ -619,7 +651,7 @@ impl Engine {
                                 self.pos.1,
                                 side,
                                 self.cfg.read().unwrap().peer_offset,
-                            ).unwrap_or(f);
+                            );
                             self.give_back(Some(frac));
                         }
                     }
