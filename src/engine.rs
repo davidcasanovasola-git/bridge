@@ -25,6 +25,7 @@ pub enum Event {
     Connected,
     Disconnected,
     Ui(Ui),
+    #[allow(dead_code)]
     DisplaysChanged,
     SystemSleep,
     SystemWake,
@@ -882,6 +883,7 @@ mod e2e {
 
     #[test]
     fn quit_hands_everything_back() {
+        RELEASED.store(false, std::sync::atomic::Ordering::SeqCst);
         let (a, b) = pair_up();
         connected(&a, &b);
         a.wait_for("capture true");
@@ -891,6 +893,10 @@ mod e2e {
         // The quitting side frees its pointer; the other side releases the held key.
         a.wait_for("capture false");
         b.wait_for("key 0xe1 false");
+        let t = Instant::now();
+        while !RELEASED.load(std::sync::atomic::Ordering::SeqCst) && t.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(RELEASED.load(std::sync::atomic::Ordering::SeqCst));
     }
 
