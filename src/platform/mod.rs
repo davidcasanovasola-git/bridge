@@ -73,6 +73,14 @@ pub trait Platform: Send + Sync {
     fn cursor(&self) -> (f64, f64);
     /// On: local input is swallowed (still reported as Input) and the pointer is frozen and hidden.
     fn set_capturing(&self, on: bool);
+    /// Release capture and position the cursor before unhiding it, preventing any center-screen flash.
+    fn release_capture(&self, warp_to: Option<(f64, f64)>) {
+        if let Some((x, y)) = warp_to {
+            self.warp(x, y);
+            self.move_to(x, y);
+        }
+        self.set_capturing(false);
+    }
     /// Move the pointer without it counting as user input.
     fn warp(&self, x: f64, y: f64);
     /// Injected input, as if it came from a real device here.

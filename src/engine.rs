@@ -579,9 +579,7 @@ impl Engine {
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 self.mode = Mode::Controlled;
-                self.plat.warp(p.0, p.1);
-                self.plat.move_to(p.0, p.1);
-                self.plat.set_capturing(false);
+                self.plat.release_capture(Some(p));
                 self.report();
             }
             Msg::Leave { frac } => {
@@ -590,7 +588,7 @@ impl Engine {
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 if unified {
-                    let (x, y) = match frac {
+                    let p = match frac {
                         Some(f) => {
                             let side = self.cfg.read().unwrap().peer_side;
                             let ds = self.displays().to_vec();
@@ -598,22 +596,22 @@ impl Engine {
                         }
                         None => self.pos,
                     };
-                    self.pos = (x, y);
-                    self.plat.warp(x, y);
-                    self.plat.move_to(x, y);
-                    self.plat.set_capturing(false);
+                    self.pos = p;
+                    self.plat.release_capture(Some(p));
                     self.mode = Mode::Controlled;
                     self.send_clipboard();
                     log::info!("unified: cursor returned to this machine");
                 } else {
-                    if was == Mode::Controlling {
-                        if let Some(f) = frac {
+                    let p = if was == Mode::Controlling {
+                        frac.map(|f| {
                             let side = self.cfg.read().unwrap().peer_side;
                             let ds = self.displays().to_vec();
-                            let (x, y) = geometry::entry_point(&ds, side, f);
-                            self.plat.warp(x, y);
-                        }
-                    }
+                            geometry::entry_point(&ds, side, f)
+                        })
+                    } else {
+                        None
+                    };
+                    self.plat.release_capture(p);
                     self.go_local();
                     if was == Mode::Controlled {
                         // The other side took its input back; hand it our clipboard.

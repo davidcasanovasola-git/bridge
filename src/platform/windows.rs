@@ -402,28 +402,54 @@ impl Platform for Win {
     }
 
     fn set_capturing(&self, on: bool) {
+        if !on {
+            self.release_capture(None);
+            return;
+        }
         let sh = SHARED.get().unwrap();
-        if on {
-            // Park the pointer mid-screen so movement in every direction registers.
-            let (cx, cy) = crate::geometry::center(&self.displays());
-            let c = POINT { x: cx as i32, y: cy as i32 };
-            if let Ok(mut cp) = sh.center.lock() {
-                *cp = c;
-            }
-            if let Ok(mut l) = sh.last.lock() {
-                *l = Some(c);
-            }
+        // Park the pointer mid-screen so movement in every direction registers.
+        let (cx, cy) = crate::geometry::center(&self.displays());
+        let c = POINT { x: cx as i32, y: cy as i32 };
+        if let Ok(mut cp) = sh.center.lock() {
+            *cp = c;
+        }
+        if let Ok(mut l) = sh.last.lock() {
+            *l = Some(c);
+        }
+        unsafe {
+            let _ = SetCursorPos(cx as i32, cy as i32);
+        }
+        hide_cursor();
+        sh.capturing.store(true, Ordering::SeqCst);
+    }
+
+    fn release_capture(&self, warp_to: Option<(f64, f64)>) {
+        let sh = SHARED.get().unwrap();
+        sh.capturing.store(false, Ordering::SeqCst);
+        if let Some((x, y)) = warp_to {
             unsafe {
-                let _ = SetCursorPos(cx as i32, cy as i32);
+                let _ = SetCursorPos(x as i32, y as i32);
             }
-            hide_cursor();
+            let (vx, vy, vw, vh) = unsafe {
+                (
+                    GetSystemMetrics(SM_XVIRTUALSCREEN) as f64,
+                    GetSystemMetrics(SM_YVIRTUALSCREEN) as f64,
+                    GetSystemMetrics(SM_CXVIRTUALSCREEN) as f64,
+                    GetSystemMetrics(SM_CYVIRTUALSCREEN) as f64,
+                )
+            };
+            let nx = ((x - vx) * 65535.0 / (vw - 1.0).max(1.0)).round() as i32;
+            let ny = ((y - vy) * 65535.0 / (vh - 1.0).max(1.0)).round() as i32;
+            send_inputs(&[mouse(nx, ny, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK)]);
+            if let Ok(mut l) = sh.last.lock() {
+                *l = Some(POINT { x: x as i32, y: y as i32 });
+            }
         } else {
-            restore_cursor();
             if let Ok(mut l) = sh.last.lock() {
                 *l = None;
             }
         }
-        sh.capturing.store(on, Ordering::SeqCst);
+        restore_cursor();
     }
 
     fn warp(&self, x: f64, y: f64) {
