@@ -376,7 +376,7 @@ impl Engine {
         if self.cfg.read().unwrap().ephemeral {
             false
         } else {
-            self.last_cross.elapsed() < Duration::from_millis(200)
+            self.last_cross.elapsed() < Duration::from_millis(500)
         }
     }
 
@@ -409,7 +409,7 @@ impl Engine {
             Side::Left | Side::Right => dx == 0.0 && dy.abs() < 40.0,
             Side::Top | Side::Bottom => dy == 0.0 && dx.abs() < 40.0,
         };
-        if out <= 0.0 && !stalled {
+        if out <= 0.0 && (!stalled || self.push == 0.0) {
             return;
         }
 
@@ -580,8 +580,8 @@ impl Engine {
                 self.last_cross = Instant::now();
                 self.mode = Mode::Controlled;
                 self.plat.warp(p.0, p.1);
-                self.plat.set_capturing(false);
                 self.plat.move_to(p.0, p.1);
+                self.plat.set_capturing(false);
                 self.report();
             }
             Msg::Leave { frac } => {
@@ -590,13 +590,17 @@ impl Engine {
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 if unified {
-                    if let Some(f) = frac {
-                        let side = self.cfg.read().unwrap().peer_side;
-                        let ds = self.displays().to_vec();
-                        let (x, y) = geometry::entry_point(&ds, side, f);
-                        self.pos = (x, y);
-                        self.plat.warp(x, y);
-                    }
+                    let (x, y) = match frac {
+                        Some(f) => {
+                            let side = self.cfg.read().unwrap().peer_side;
+                            let ds = self.displays().to_vec();
+                            geometry::entry_point(&ds, side, f)
+                        }
+                        None => self.pos,
+                    };
+                    self.pos = (x, y);
+                    self.plat.warp(x, y);
+                    self.plat.move_to(x, y);
                     self.plat.set_capturing(false);
                     self.mode = Mode::Controlled;
                     self.send_clipboard();
