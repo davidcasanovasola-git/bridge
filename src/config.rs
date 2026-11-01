@@ -64,6 +64,8 @@ pub struct Config {
     pub discovery: bool,
     /// Look for a new version once a day.
     pub check_updates: bool,
+    /// Automatically download and install updates when found.
+    pub auto_install_updates: bool,
     /// In-memory only (tests): never written to or reloaded from disk.
     #[serde(skip)]
     pub ephemeral: bool,
@@ -94,6 +96,7 @@ impl Default for Config {
             port: crate::proto::PORT,
             discovery: true,
             check_updates: true,
+            auto_install_updates: true,
             ephemeral: false,
         }
     }

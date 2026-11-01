@@ -680,15 +680,26 @@ pub fn run() {
         let (cfg, slot) = (cfg.clone(), release.clone());
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(20));
-            if cfg.read().unwrap().check_updates {
+            let (check, auto) = {
+                let c = cfg.read().unwrap();
+                (c.check_updates, c.auto_install_updates)
+            };
+            if check {
                 if let Ok(Some(r)) = updater::check() {
                     let v = r.version.clone();
-                    *slot.lock().unwrap() = Some(r);
-                    post(UserEvent::Notify {
-                        title: format!("Bridge {v} is available"),
-                        body: "Click to see what's new and install it.".into(),
-                        action: Some(Page::About),
-                    });
+                    *slot.lock().unwrap() = Some(r.clone());
+                    if auto {
+                        log::info!("auto-installing update to {v}...");
+                        if let Err(e) = updater::install(&r, |_| {}) {
+                            log::warn!("auto-update failed: {e}");
+                        }
+                    } else {
+                        post(UserEvent::Notify {
+                            title: format!("Bridge {v} is available"),
+                            body: "Click to see what's new and install it.".into(),
+                            action: Some(Page::About),
+                        });
+                    }
                 }
             }
             std::thread::sleep(Duration::from_secs(24 * 3600));

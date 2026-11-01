@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::path::Path;
 
-const REPO: &str = "ishanmalu/bridge";
+const REPO: &str = "davidcasanovasola-git/bridge";
 const PUBLIC_KEY: &str = "682cc431b9479e0ddb27539bff67e1a18425a1e2d6ace8c6a2223201123b440a";
 
 #[cfg(target_os = "macos")]
@@ -28,7 +28,7 @@ pub struct Release {
     pub url: String,
     asset: String,
     sums: String,
-    sig: String,
+    sig: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -81,9 +81,10 @@ pub fn check() -> Result<Option<Release>, String> {
         return Ok(None);
     }
     let find = |name: &str| r.assets.iter().find(|a| a.name == name).map(|a| a.browser_download_url.clone());
-    let (Some(asset), Some(sums), Some(sig)) = (find(ASSET), find("SHA256SUMS.txt"), find("SHA256SUMS.txt.sig")) else {
-        return Err(format!("{} has no signed download for this system", r.tag_name));
+    let (Some(asset), Some(sums)) = (find(ASSET), find("SHA256SUMS.txt")) else {
+        return Err(format!("{} has no download for this system", r.tag_name));
     };
+    let sig = find("SHA256SUMS.txt.sig");
     Ok(Some(Release {
         version: r.tag_name.trim_start_matches('v').to_string(),
         notes: r.body.unwrap_or_default(),
@@ -95,9 +96,17 @@ pub fn check() -> Result<Option<Release>, String> {
 }
 
 /// Checks `sums` against `sig` and returns the expected SHA-256 for `name`.
-fn expected_hash(sums: &[u8], sig: &[u8], name: &str) -> Result<String, String> {
-    let key: [u8; 32] = hex::decode(PUBLIC_KEY).unwrap().try_into().unwrap();
-    expected_hash_with(&key, sums, sig, name)
+fn expected_hash(sums: &[u8], sig: Option<&[u8]>, name: &str) -> Result<String, String> {
+    if let Some(sig) = sig {
+        let key: [u8; 32] = hex::decode(PUBLIC_KEY).unwrap().try_into().unwrap();
+        expected_hash_with(&key, sums, sig, name)?;
+    }
+    let text = std::str::from_utf8(sums).map_err(|e| e.to_string())?;
+    text.lines()
+        .filter_map(|l| l.split_once(char::is_whitespace))
+        .find(|(_, n)| n.trim().trim_start_matches('*') == name)
+        .map(|(h, _)| h.to_lowercase())
+        .ok_or_else(|| format!("{name} isn't in the checksum list"))
 }
 
 fn expected_hash_with(key: &[u8; 32], sums: &[u8], sig: &[u8], name: &str) -> Result<String, String> {
@@ -116,8 +125,11 @@ fn expected_hash_with(key: &[u8; 32], sums: &[u8], sig: &[u8], name: &str) -> Re
 /// Download, verify and install `r`, then relaunch. Only returns on failure.
 pub fn install(r: &Release, progress: impl Fn(f32)) -> Result<(), String> {
     let sums = get(&r.sums, 1 << 16)?;
-    let sig = get(&r.sig, 1 << 10)?;
-    let want = expected_hash(&sums, &sig, ASSET)?;
+    let sig = match &r.sig {
+        Some(url) => Some(get(url, 1 << 10)?),
+        None => None,
+    };
+    let want = expected_hash(&sums, sig.as_deref(), ASSET)?;
 
     let resp = agent().get(&r.asset).call().map_err(|e| e.to_string())?;
     let total: Option<u64> = resp.headers().get("content-length").and_then(|v| v.to_str().ok()?.parse().ok());
@@ -265,6 +277,11 @@ mod tests {
     #[test]
     fn tampered_sums_are_refused() {
         let sig = [0u8; 64];
-        assert!(expected_hash(b"abc  Bridge-mac.zip\n", &sig, "Bridge-mac.zip").is_err());
+        assert!(expected_hash(b"abc  Bridge-mac.zip\n", Some(&sig), "Bridge-mac.zip").is_err());
+    }
+
+    #[test]
+    fn unsigned_sums_verify_hash() {
+        assert_eq!(expected_hash(b"abc  Bridge-mac.zip\n", None, "Bridge-mac.zip").unwrap(), "abc");
     }
 }
