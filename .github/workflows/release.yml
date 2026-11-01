@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build universal macOS app
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          rm -rf dist && mkdir -p dist/Bridge.app/Contents/MacOS
+          lipo -create -output dist/Bridge.app/Contents/MacOS/bridge \
+            target/aarch64-apple-darwin/release/bridge target/x86_64-apple-darwin/release/bridge
+          mkdir -p dist/Bridge.app/Contents/Resources && cp assets/icon.icns dist/Bridge.app/Contents/Resources/Bridge.icns
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          cat > dist/Bridge.app/Contents/Info.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Bridge</string>
+            <key>CFBundleIdentifier</key><string>dev.ishanmalu.bridge</string>
+            <key>CFBundleExecutable</key><string>bridge</string>
+            <key>CFBundleIconFile</key><string>Bridge</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>LSUIElement</key><true/>
+          </dict></plist>
+          PLIST
+          codesign --force --sign - dist/Bridge.app
+          cd dist && ditto -c -k --keepParent Bridge.app Bridge-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bridge-mac
+          path: dist/Bridge-mac.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Self-test the release exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target\release\bridge.exe -ArgumentList selftest -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "selftest failed: $($p.ExitCode) checks" }
+      - name: Package Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\bridge.exe dist\Bridge.exe
+          Copy-Item target\release\bridge.exe dist\Bridge-windows.exe
+          Compress-Archive -Path dist\Bridge.exe -DestinationPath dist\Bridge-windows.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bridge-windows
+          path: |
+            dist/Bridge-windows.exe
+            dist/Bridge-windows.zip
+
+  publish:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: Bridge-mac
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: Bridge-windows
+          path: dist
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          sha256sum Bridge-mac.zip Bridge-windows.zip Bridge-windows.exe > SHA256SUMS.txt
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ -z "$TAG" || "$TAG" == "main" ]]; then
+            TAG="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          fi
+          gh release upload "$TAG" dist/* --clobber || gh release create "$TAG" dist/* --generate-notes
