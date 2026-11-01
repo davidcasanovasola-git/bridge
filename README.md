@@ -1,121 +1,101 @@
-# Bridge
+# Bridge (Enhanced Multi-Monitor Edition)
 
-One keyboard and mouse for a Mac and a PC, in either direction. Push the pointer off the shared
-edge (or double-tap Right Option on the Mac / Right Ctrl on the PC) and your keyboard and mouse
-drive the other machine. The clipboard comes with you.
+[![Release](https://img.shields.io/github/v/release/davidcasanovasola-git/bridge?color=blue&label=Latest%20Release)](https://github.com/davidcasanovasola-git/bridge/releases/latest)
+[![CI](https://github.com/davidcasanovasola-git/bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/davidcasanovasola-git/bridge/actions/workflows/ci.yml)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 
-One Rust codebase builds both sides. No server, no account: the two machines talk directly on your
-network over Noise (KK, keys pinned at pairing).
+> **One keyboard and mouse for a Mac and a PC, taken to the next level.**  
+> Seamless peer-to-peer control with full multi-monitor setups, an interactive visual display layout designer, dynamic network synchronization, and unified cursor tracking.
 
-## What it does
+---
 
-- **Edge crossing** onto the right display at the same point along the border, with push resistance.
-- **Hotkey**: double-tap Right Option (Mac) or Right Ctrl (PC).
-- **Clipboard**: text, images and **copied files** move when you switch (files land in `~/Downloads/Bridge`).
-- **Shortcuts work**: Cmd↔Ctrl swap, so Cmd+C copies on the PC and the PC's Ctrl+C is Cmd+C on the Mac.
-- **Media keys** both ways (play/pause, next, previous, volume, mute). Brightness stays local.
-- **Touch to reclaim**: move a machine's own mouse while it's being driven and it takes control back.
-- **Wake-on-LAN**: switching to a sleeping PC wakes it (learned automatically after the first connection).
-- **Full-screen apps hold the edges** on Windows (games, films); the hotkey still works.
-- **Pause crossing**, **start at login**, auto-reconnect after sleep or network changes.
+### Acknowledgement & Upstream Credit
+This repository is an enhanced fork of [**Bridge** by Ishan Malu](https://github.com/ishanmalu/bridge). The original Bridge established the rock-solid Rust foundation: direct peer-to-peer communication over encrypted Noise KK sockets, zero-latency input transmission, bidirectional clipboard synchronization, and no third-party servers or accounts. All core protocol and architectural foundations belong to the original author.
 
-## Download
+---
 
-From [Releases](https://github.com/ishanmalu/bridge/releases/latest): `Bridge-mac.zip` (Apple silicon
-and Intel, macOS 11+) and `Bridge-windows.zip` (Windows 10/11, x64). You need it on both machines.
-Checksums are in `SHA256SUMS.txt`.
+## Why This Fork?
 
-Bridge isn't signed with paid Apple/Microsoft certificates yet, so both systems warn the first time:
+Upstream Bridge works well for simple single-monitor setups, but modern desk workflows frequently span multiple monitors of different sizes, resolutions, and orientations.
 
-- **Mac**: unzip, drag Bridge to Applications, open it. When macOS says it can't verify it, open
-  System Settings → Privacy & Security, scroll down and click **Open Anyway**. (Or in Terminal:
-  `xattr -dr com.apple.quarantine /Applications/Bridge.app`.)
-- **Windows**: SmartScreen shows "Windows protected your PC": click **More info → Run anyway**.
+This fork turns Bridge into a powerhouse for power users, dual-workstation setups, and multi-monitor desk layouts:
 
-## Set up
+### 🖥️ Full Multi-Monitor Detection & Physical Geometry
+- **Dynamic Multi-Screen Detection**: Automatically queries all attached displays on both Windows and macOS.
+- **Physical Size & DPI Calculations**: Computes real physical display dimensions (inches) and DPI scaling rather than relying on arbitrary 24-inch fallbacks.
+- **Persistent Monitor Topologies**: Remembers peer multi-monitor setups across restarts.
 
-1. **Mac**: open Bridge. Grant it **Accessibility** when asked (System Settings → Privacy & Security
-   → Accessibility, switch Bridge on). It appears in the menu bar.
-2. **PC**: make a folder `C:\Program Files\Bridge`, put `Bridge.exe` in it, then right-click it →
-   **Run as administrator**. Running as administrator lets Bridge type into admin windows and adds
-   its firewall rule for private networks. It appears in the tray (click ^ by the clock).
-   Then choose **Start at login** in its menu: from Program Files, that starts it elevated at every
-   login without a prompt.
-3. **Pair**: on the PC choose *Pair → Show a pairing code*. On the Mac choose *Pair → Enter a pairing
-   code…* and type it. If it can't find the PC, type the code then the address the PC shows,
-   e.g. `123456 192.168.1.20`.
-4. **Cross**: push the pointer off the Mac's right edge. (PC on the other side? Set `peer_side`.)
-   Or double-tap Right Option (Mac) / Right Ctrl (PC).
+### 🎨 Interactive Visual Layout Designer
+- **Visual Display Canvas**: Built-in interactive display designer accessible directly from the app interface (`bridge settings` or tray/menu bar).
+- **Magnetic Snapping & Dual Cluster Dragging**: Drag entire machine display clusters or snap monitor edges together effortlessly.
+- **Millimeter-Precision Offset Fine-Tuning**: Fine-tune vertical and horizontal monitor alignments to perfectly mirror your physical desk layout.
+- **Clean Labeling & Scaling**: Displays clean, readable monitor labels and auto-centers the layout scene dynamically.
 
-Check a machine on its own any time: `bridge selftest` (Mac:
-`/Applications/Bridge.app/Contents/MacOS/bridge selftest`; PC: `"C:\Program Files\Bridge\Bridge.exe" selftest`
-from a terminal).
+### ⚡ Live Network Topology Synchronization
+- **Real-Time Layout Sync**: When you adjust your monitor arrangement on one machine, the layout (`peer_side` and offsets) automatically synchronizes across the network to the other machine in real time—no reconnections or manual edits required.
 
-## Security
+### 🎯 Unified Follow-The-Cursor & Split Hardware
+- **Follow-The-Cursor Mode**: The active focus follows the cursor naturally. Move your mouse to the other machine, and your local keyboard automatically forwards to that screen.
+- **Split Peripherals**: Allows using Mac keyboard + PC mouse or any combination interchangeably across both systems.
 
-- Nothing goes through a server. The machines connect directly on your network (TCP 24800).
-- Pairing turns the six-digit code into a key with SPAKE2: someone watching the network learns
-  nothing, and a guesser gets one try per attempt, three attempts per code.
-- After pairing, every connection is Noise KK with both machines' keys pinned. An unpaired device
-  can't connect, read or inject anything.
-- Keystrokes leave the machine only while you're driving the other one. Nothing is logged except
-  connection events.
-- Received files are saved under `Downloads/Bridge` with sanitised names.
-- The private key lives in the config file, readable only by you.
-- The elevated Windows login task is only created when Bridge runs from Program Files, so an
-  ordinary program can't swap the binary.
+### 🚀 Ultra-Smooth Transitions & Zero Flicker
+- **Anti-Flicker Pre-Warping**: Pre-warps the cursor to the exact entry boundary before unhiding, eliminating center-screen cursor flickers during transitions.
+- **Accurate 1:1 Edge Crossing**: Precise mathematical border crossing even between screens with vastly different resolutions or vertical offsets.
+- **Windows Mouse Delta Accuracy**: Re-centers cursor during raw input capture to eliminate edge race conditions and sudden jumps with high-polling USB mice.
 
-## Build from source
+### 🛡️ System Polish & Reliability
+- **Clean Goodbye Protocol**: Graceful peripheral release and instant state handover on system quit, sleep, or shutdown.
+- **macOS Menu Bar Title**: Clear status visibility right on the macOS menu bar.
+- **Windows Path Handling**: Fixes PowerShell relaunch behavior to eliminate quoting bugs on install paths with spaces.
+
+---
+
+## Downloads
+
+Precompiled release binaries are available on the [**Releases Page**](https://github.com/davidcasanovasola-git/bridge/releases/latest):
+
+| Platform | Download | Description |
+|---|---|---|
+| **Windows** (10 / 11, x64) | [`Bridge-windows.zip`](https://github.com/davidcasanovasola-git/bridge/releases/latest/download/Bridge-windows.zip) / [`.exe`](https://github.com/davidcasanovasola-git/bridge/releases/latest/download/Bridge-windows.exe) | Single standalone executable (MSVC build with embedded WebView2) |
+| **macOS** (11+, Universal) | [`Bridge-mac.zip`](https://github.com/davidcasanovasola-git/bridge/releases/latest/download/Bridge-mac.zip) | Universal binary bundle (Apple Silicon M1/M2/M3/M4 & Intel) |
+
+*Checksums are verified in `SHA256SUMS.txt`.*
+
+---
+
+## Quick Setup
+
+1. **Mac**: Unzip `Bridge-mac.zip`, drag `Bridge.app` to `/Applications`, and open it. Grant **Accessibility** permissions when prompted (System Settings → Privacy & Security → Accessibility).
+2. **PC**: Download `Bridge-windows.zip` (or `.exe`), move it to `C:\Program Files\Bridge\Bridge.exe`, and right-click → **Run as administrator** (enables elevated window input and adds firewall rules).
+3. **Pair**:
+   - On the PC: Choose *Pair → Show a pairing code*.
+   - On the Mac: Choose *Pair → Enter a pairing code…* and enter the 6-digit code.
+4. **Arrange**:
+   - Open the **Display Designer** from the menu or CLI (`bridge settings`).
+   - Drag your screens to match your desk layout, and enjoy seamless multi-monitor edge crossing!
+
+---
+
+## Building from Source
+
+Requirements:
+- Rust 1.80+ (`stable`)
+- Windows (MSVC toolchain) or macOS (Xcode Command Line Tools)
 
 ```sh
-rustup target add aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-gnu
-brew install mingw-w64
-./scripts/build.sh        # tests, then dist/Bridge.app, dist/Bridge.exe and release zips
+# Clone repository
+git clone https://github.com/davidcasanovasola-git/bridge.git
+cd bridge
+
+# Run tests
+cargo test
+
+# Build optimized release binary
+cargo build --release
 ```
 
-`cargo test` runs unit tests plus two end-to-end tests: two full Bridges talking over localhost,
-covering crossing, keys, mouse, scroll, media, the hotkey, touch-to-reclaim and stuck-key release.
-CI runs them on macOS and Windows, plus `bridge selftest` on a real Windows machine.
+---
 
-## Updating
+## License
 
-Bridge checks for updates once a day and shows a banner when one is ready; click it, or choose
-*Check for updates…* in the menu, then **Install and relaunch**. Every update is verified against a
-signing key built into the app before it's installed. On the Mac, permissions carry over.
-
-Coming from 0.1.x (no updater yet)? Download the new version once by hand: on the Mac replace
-Bridge in Applications; on Windows run the new `Bridge.exe` and choose **Install**.
-
-## Settings
-
-Edit with *Open settings file* (Mac: `~/Library/Application Support/Bridge/config.toml`,
-PC: `%APPDATA%\Bridge\config.toml`), then quit and reopen Bridge.
-
-| key | default | |
-|---|---|---|
-| `peer_side` | Mac `right`, PC `left` | which edge faces the other machine (`left`/`right`/`top`/`bottom`) |
-| `edge_resistance` | `30` | pixels of push before crossing |
-| `incoming_pointer_scale` | `1.0` | raise on the PC if the Mac's trackpad feels slow there (high-DPI screens) |
-| `incoming_scroll_scale` / `invert_incoming_scroll` | `1.0` / `false` | scrolling feel |
-| `hotkey` | Mac `230` (Right Option), PC `228` (Right Ctrl) | HID usage of the double-tap key |
-| `swap_cmd_ctrl` | `true` | |
-| `share_clipboard`, `max_clipboard_files_mb` | `true`, `200` | |
-| `block_in_fullscreen` | `true` | Windows: a full-screen app keeps the pointer (hotkey still works) |
-| `unified_desktop` | `true` | Unified Follow-the-Cursor: all mouse/keyboard inputs follow whichever screen has the active cursor |
-| `forward_on_connect` | `false` | Immediately capture and forward input to peer upon connection |
-| `port`, `discovery` | `24800`, `true` | listening port; mDNS lookup of the other machine |
-
-## Troubleshooting
-
-- *Open log* in the menu. `bridge status` from a terminal shows the pairing.
-- Won't connect: both machines on the same network; TCP 24800 (and 24801 for pairing) allowed
-  through the Windows firewall on private networks.
-- The pointer is invisible on the PC after a crash: start Bridge again (it restores the cursors).
-- Wake-on-LAN needs it enabled in the PC's BIOS/network adapter, and usually Ethernet.
-- Typing doesn't reach admin windows on the PC: Bridge isn't running as administrator.
-- Windows' UAC prompt and lock screen run on a secure desktop no app can type into.
-
-## Not built yet
-
-Mac trackpad gestures → Task View/virtual desktops, mirrored notifications, cross-machine search,
-audio handoff, a visual screen-layout editor, Linux.
+Derived from the original Bridge project by Ishan Malu, released under the [PolyForm Noncommercial 1.0.0 License](LICENSE).
