@@ -427,6 +427,7 @@ impl Platform for Win {
         let sh = SHARED.get().unwrap();
         sh.capturing.store(false, Ordering::SeqCst);
         if let Some((x, y)) = warp_to {
+            log::info!("release_capture: positioning cursor at ({x:.1}, {y:.1})");
             unsafe {
                 let _ = SetCursorPos(x as i32, y as i32);
             }
@@ -445,6 +446,7 @@ impl Platform for Win {
                 *l = Some(POINT { x: x as i32, y: y as i32 });
             }
         } else {
+            log::info!("release_capture: called with None (leaving cursor where it is)");
             if let Ok(mut l) = sh.last.lock() {
                 *l = None;
             }

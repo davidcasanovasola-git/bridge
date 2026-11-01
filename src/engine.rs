@@ -10,7 +10,7 @@ use crate::geometry::{self, Step};
 use crate::keymap;
 use crate::net::Net;
 use crate::platform::{Input, Platform, Rect};
-use crate::proto::{Msg, Os, Side};
+use crate::proto::{Msg, Os};
 use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, RwLock};
@@ -376,7 +376,7 @@ impl Engine {
         if self.cfg.read().unwrap().ephemeral {
             false
         } else {
-            self.last_cross.elapsed() < Duration::from_millis(500)
+            self.last_cross.elapsed() < Duration::from_millis(800)
         }
     }
 
@@ -397,19 +397,16 @@ impl Engine {
             return;
         }
         let out = geometry::outward(side, dx, dy);
-        // Only clear push if moving decisively away from the edge (ignore tiny hand tremor)
-        if out < -4.0 {
+        if out < 0.0 {
             self.push = 0.0;
             return;
         }
 
-        // When the cursor is at the physical edge, the OS clamps movement in the outward direction to 0.0.
-        // Parallel motion along the edge often has minor human hand tremor.
-        let stalled = match side {
-            Side::Left | Side::Right => dx == 0.0 && dy.abs() < 40.0,
-            Side::Top | Side::Bottom => dy == 0.0 && dx.abs() < 40.0,
-        };
-        if out <= 0.0 && (!stalled || self.push == 0.0) {
+        // When clamped at physical edge, mouse push into edge registers dx==0 && dy==0.
+        // Pure sideways motion along edge (e.g. taskbar) must not count as an outward push.
+        let stalled = dx == 0.0 && dy == 0.0;
+        if out == 0.0 && !stalled {
+            self.push = 0.0;
             return;
         }
 
@@ -574,8 +571,10 @@ impl Engine {
                     Some(f) => geometry::entry_point(&ds, side, f),
                     None => geometry::center(&ds),
                 };
+                log::info!("Msg::Enter: frac={frac:?}, side={side:?}, p={p:?}");
                 self.pos = p;
                 self.reclaim = 0.0;
+                self.push = 0.0;
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 self.mode = Mode::Controlled;
@@ -585,17 +584,23 @@ impl Engine {
             Msg::Leave { frac } => {
                 let was = self.mode;
                 let unified = self.cfg.read().unwrap().unified_desktop;
+                self.push = 0.0;
                 self.exit_push = 0.0;
                 self.last_cross = Instant::now();
                 if unified {
+                    let side = self.cfg.read().unwrap().peer_side;
+                    let ds = self.displays().to_vec();
                     let p = match frac {
-                        Some(f) => {
-                            let side = self.cfg.read().unwrap().peer_side;
-                            let ds = self.displays().to_vec();
-                            geometry::entry_point(&ds, side, f)
+                        Some(f) => geometry::entry_point(&ds, side, f),
+                        None => {
+                            if was == Mode::Controlling {
+                                geometry::entry_point(&ds, side, 0.5)
+                            } else {
+                                self.pos
+                            }
                         }
-                        None => self.pos,
                     };
+                    log::info!("Msg::Leave: frac={frac:?}, side={side:?}, p={p:?}, was={was:?}");
                     self.pos = p;
                     self.plat.release_capture(Some(p));
                     self.mode = Mode::Controlled;
@@ -603,10 +608,11 @@ impl Engine {
                     log::info!("unified: cursor returned to this machine");
                 } else {
                     let p = if was == Mode::Controlling {
-                        frac.map(|f| {
-                            let side = self.cfg.read().unwrap().peer_side;
-                            let ds = self.displays().to_vec();
-                            geometry::entry_point(&ds, side, f)
+                        let side = self.cfg.read().unwrap().peer_side;
+                        let ds = self.displays().to_vec();
+                        Some(match frac {
+                            Some(f) => geometry::entry_point(&ds, side, f),
+                            None => geometry::entry_point(&ds, side, 0.5),
                         })
                     } else {
                         None
